@@ -53,6 +53,23 @@ referring to an actual file containing the provider implementations we will say
 Rundeck supports several different types of plugins to perform different kinds 
 of services.
 
+Types of plugins:
+
+* [Workflow Step](#workflow-step-plugins) - defines an action that can be a distinct step within a workflow, either for an individual Node or a set of Nodes
+* [Node Execution](#node-execution-plugins) - defines a mechanism to connect to a remote Node and execute a command
+* [File Copier](#node-execution-plugins) - defines a mechanism to copy a file to a remote node
+* [Resource Model Source](#resource-model-source-plugins) - defines a mechanism to retrieve Resource Model data (Node definitions) for use by a Rundeck project
+* [Resource Format](#resource-format-plugins) - defines a data format for Resource Models
+* [Notification](#notification-plugins) - defines a mechanism for notification that can be triggered when a Job starts or finishes
+* [Streaming Logging](#streaming-logging-plugins) - defines a mechanism for reading and writing log events
+* [Log File Storage](#logging-plugins) - defines a mechanism for storage of log files
+
+## Plugin Development
+
+Plugins can be developed easily using scripts, or you can use Java.
+
+See more information in the [Developer Guide - Plugin Development](../developer/plugin-development.html) chapter.
+
 ### Workflow Step Plugins
 
 These plugins define the behavior taken for a single step in a workflow.  
@@ -68,6 +85,7 @@ types of plugins that can be defined:
 More information:
 
 * Configuration: [Workflow Step Services](plugins.html#workflow-step-services)
+* Development: [Workflow Step Plugin Development](../developer/workflow-step-plugin-development.html)
 
 ### Node Execution Plugins
 
@@ -100,6 +118,34 @@ More information:
 
 * Configuration: [Resource Format Generators and Parsers](plugins.html#resource-format-generators-and-parsers)
 * Built-in Providers: [Resource Format services](plugins.html#resource-format-services)
+
+### Notification Plugins
+
+These plugins define notification mechanisms, and are triggered when a Job 
+finishes or starts.
+
+More information:
+
+* Configuration: [Notifications](plugins.html#notifications)
+* Development: [Notification Plugin Development](../developer/notification-plugin-development.html)
+
+### Streaming Logging Plugins
+
+These plugins define logging event streams for reading or writing execution logs. Multiple writers can be enabled. Rundeck has a built-in implementation called the **Local File Log**.
+
+More information:
+
+* Configuration: [Logging](plugins.html#logging)
+* Development: [Logging Plugin Development](../developer/logging-plugin-development.html)
+
+### Log File Storage Plugins
+
+These plugins define a mechanism for storing and retrieving execution Log files, and work with Rundeck's built-in **Local File Log**.
+
+More information:
+
+* Configuration: [Logging](plugins.html#logging)
+* Development: [Logging Plugin Development](../developer/logging-plugin-development.html)
 
 ## About Services and Providers
 
@@ -138,7 +184,11 @@ Services fall into different categories, which determine how and where they are 
 
     1. Workflow Step - providers define behavior for all nodes 
     2. Workflow Node Step - providers define behavior for a single node
-    3. Remote Script Node Step - a specific use-case for Node Step providers 
+    3. Remote Script Node Step - a specific use-case for Node Step providers
+
+5. **Notification services**
+    
+    1. Notifications - external actions that are triggered when a Job starts or finishes.
 
 Specifics of how providers of these plugins work is listed below.
 
@@ -331,6 +381,96 @@ In other cases, the exact name of the provider may not be known (for example
 when loading content from a remote URL).  Each Generator and Parser must define
 a list of MIME Type strings and file extensions that they support. These 
 are used to determine which parser/generator is to be used.
+
+### Notifications
+
+Notifications can be configured for Jobs, and can be triggered when certain
+conditions occur.  These conditions are called "triggers", these are the 
+currently available triggers:
+
+* `onstart` - the Job started
+* `onsuccess` - the Job succeeded
+* `onfailure` - the Job failed
+
+When you define the Job in the GUI or via [XML](../manpages/man5/job-v20.html#notification) or
+[Yaml](../manpages/man5/job-yaml-v12.html#notification), you can add any of the available Notification plugin types to happen for
+any of the possible triggers.  Each Notification plugin type may have unique
+configuration properties that you can specify. Each combination of trigger and
+ Notification type has a unique configuration.
+
+When defining configuration values for a plugin, you can usually substitute
+any "Job context variables" that are listed under [Context Variables](job-workflows.html#context-variables). (Note: Some configuration properties of a plugin may not support this feature.)
+
+In addition, you can also use these variables:
+
+* `${job.user.name}` - the user who executed the job
+* `${job.user.email}` - the email of the executing user if set in their user profile
+* `${job.user.firstName}` - the first name of the executing user if set in their user profile
+* `${job.user.lastName}` - the first name of the executing user if set in their user profile
+
+### Logging
+
+Logging plugins consist of Readers and Writers, and Log File Storage.
+Rundeck has a built-in Reader/Writer called the **Local File Log** that is used by default.
+
+Logging plugins are enabled in the `rundeck-config` file.  You should add an entry identifying the plugin by its "provider name".  For Java plugins, this provider name is defined in the Java code.  For Groovy plugins, the provider name is usually just the name of the Groovy script file, such as "MyStreamingLogWriterPlugin".
+
+To add StreamingLogWriter plugins, add a comma separated list to this entry, note that this will enable these plugins in addition to the **Local File Log Writer**:
+
+* `rundeck.execution.logs.streamingWriterPlugins`
+    * example value: `MyStreamingLogWriterPlugin,otherPlugin`
+
+To change the StreamingLogReader plugin. Note that this will replace the **Local File Log Reader**, but will not disable the **Local File Log Writer**:
+
+* `rundeck.execution.logs.streamingReaderPlugin`
+    * example value: `MyStreamingLogReaderPlugin`
+
+To disable the **Local File Log Writer**:
+
+* `rundeck.execution.logs.localFileStorageEnabled`
+    * value: `false`
+
+To configure a LogFileStorage plugin:
+
+* `rundeck.execution.logs.fileStoragePlugin`
+    * example value: `MyLogFileStoragePlugin`
+
+Also, if `localFileStorageEnabled` is `false`, but no `streamingReaderPlugin` is enabled, then Rundeck will still default to using the **Local File Log Writer**.
+
+The LogFileStorage plugins also have some associated configuration values
+that can be used to tune the behavior of the plugins:
+
+* `rundeck.execution.logs.fileStorage.storageRetryCount`
+    * The number of `store` attempts to try before giving up for a single log file
+    * default value: `1` 
+* `rundeck.execution.logs.fileStorage.storageRetryDelay`
+    * Time to wait between retry attempts
+    * default value: `60` (seconds)
+* `rundeck.execution.logs.fileStorage.retrievalRetryCount`
+    * The number of `retrieve` attempts to try before giving up for a single log file
+    * default value: `3` 
+* `rundeck.execution.logs.fileStorage.retrievalRetryDelay`
+    * Time to wait between retry attempts
+    * default value: `60` (seconds)
+* `rundeck.execution.logs.fileStorage.remotePendingDelay`
+    * Grace time to allow after an execution finishes. Clients will see a "pending" message within this period after an execution finishes, even if the storage plugin is unable to find the log file. After this time period, they will see a "not found" message if the plugin is unable to find the log file.
+    * default value: `120` (seconds)
+
+### Logging Plugin Configuration
+
+Logging plugins can define configuration properties, which can be set in the `framework.properties` (system-wide) or `project.properties` (project-wide).  Project-level properties override system-level properties.
+
+To add a configuration property, add a value to the appropriate file in the following format:
+
+`SCOPE.plugin.TYPE.PROVIDER.PROPERTY=value`
+
+`SCOPE` is either `framework` or `project`.
+
+The `TYPE` is one of:
+
+* `StreamingLogReader`, `StreamingLogWriter`, or `LogFileStorage`
+
+`PROVIDER` is the provider name of the plugin.
 
 ## When Node Execution Service providers are invoked
 
@@ -1169,15 +1309,13 @@ Contents of `/tmp/myexec.sh`:
 
     # args are [hostname] [username] -- [command to exec...]
 
-    host=$1
-    shift
-    user=$1
-    shift
-    command="$*"
+    host=$1; shift
+    user=$1; shift
+    printf -v commands '%q ' "$@"
 
     REMOTECMD=ssh
 
-    exec $REMOTECMD $user@$host $command
+    exec "$REMOTECMD" "$user@$host" "$command"
 
 **Example script-copy**:
 
@@ -1197,20 +1335,17 @@ Contents of `/tmp/mycopy.sh`:
 
     # args are [hostname] [username] [destdir] [filepath]
 
-    host=$1
-    shift
-    user=$1
-    shift
-    dir=$1
-    shift
+    host=$1; shift
+    user=$1; shift
+    dir=$1; shift
     file=$1
 
-    name=`basename $file`
+    name=${file##*/}
 
     # copy to node
     CPCMD=scp
 
-    exec $CPCMD $file $user@$host:$dir/$name > /dev/null || exit $?
+    "$CPCMD" "$file" "$user@$host:$dir/$name" >/dev/null || exit $?
 
     echo "$dir/$name"
 
@@ -1286,8 +1421,3 @@ You can also test some failure scenarios by configuring the following node attri
 You could, for example, disable or test an entire project's workflows or jobs by
 simply setting the `project.properties` node executor provider to `stub`.
 
-## Plugin Development
-
-Plugins can be developed easily using scripts, or you can use Java.
-
-See more information in the [Developer Guide - Plugin Development](../developer/plugin-development.html) chapter.

@@ -16,7 +16,7 @@ APIURL="${RDURL}/api/${TEST_API_VERSION}"
 
 runurl="${APIURL}/run/command"
 proj="test"
-params="project=${proj}&exec=echo+testing+execution+output+api+line+1;sleep+2;echo+line+2;sleep+2;echo+line+3;sleep+2;echo+line+4+final"
+params="project=${proj}&exec=echo+testing+execution+output+api1v5+line+1;sleep+2;echo+line+2;sleep+2;echo+line+3;sleep+2;echo+line+4+final"
 
 # get listing
 docurl ${runurl}?${params} > $DIR/curl.out
@@ -25,7 +25,7 @@ if [ 0 != $? ] ; then
     exit 2
 fi
 
-sh $DIR/api-test-success.sh $DIR/curl.out || exit 2
+sh $SRC_DIR/api-test-success.sh $DIR/curl.out || exit 2
 
 #select id
 
@@ -79,7 +79,7 @@ while [[ $ddone == "false" && $dc -lt $dmax ]]; do
         exit 2
     fi
 
-    sh $DIR/api-test-success.sh $DIR/curl.out || exit 2
+    sh $SRC_DIR/api-test-success.sh $DIR/curl.out || exit 2
 
     verify_entry_output $DIR/curl.out
 
@@ -107,6 +107,10 @@ if [[ $ddone != "true" ]]; then
     exit 2
 fi
 
+##wait for exec to finish...
+rd-queue follow -q -e $execid || fail "Waiting for $execid to finish"
+sh $SRC_DIR/api-expect-exec-success.sh $execid || exit 2
+
 echo "OK"
 
 
@@ -116,7 +120,7 @@ echo "OK"
 
 runurl="${APIURL}/run/command"
 proj="test"
-params="project=${proj}&exec=echo+testing+execution+output+api+line+1;sleep+2;echo+line+2;sleep+2;echo+line+3;sleep+2;echo+line+4+final"
+params="project=${proj}&exec=echo+testing+execution+output+api2v5+line+1;sleep+2;echo+line+2;sleep+2;echo+line+3;sleep+2;echo+line+4+final"
 
 # get listing
 docurl ${runurl}?${params} > $DIR/curl.out
@@ -125,7 +129,7 @@ if [ 0 != $? ] ; then
     exit 2
 fi
 
-sh $DIR/api-test-success.sh $DIR/curl.out || exit 2
+sh $SRC_DIR/api-test-success.sh $DIR/curl.out || exit 2
 
 #select id
 
@@ -162,7 +166,7 @@ while [[ $ddone == "false" && $dc -lt $dmax ]]; do
         exit 2
     fi
 
-    sh $DIR/api-test-success.sh $DIR/curl.out || exit 2
+    sh $SRC_DIR/api-test-success.sh $DIR/curl.out || exit 2
 
     verify_entry_output $DIR/curl.out
     
@@ -189,6 +193,10 @@ if [[ $ddone != "true" ]]; then
     exit 2
 fi
 
+##wait for exec to finish...
+rd-queue follow -q -e $execid || fail "Waiting for $execid to finish"
+sh $SRC_DIR/api-expect-exec-success.sh $execid || exit 2
+
 echo "OK"
 
 
@@ -199,7 +207,7 @@ echo "OK"
 
 runurl="${APIURL}/run/command"
 proj="test"
-params="project=${proj}&exec=echo+testing+execution+output+api+line+1;sleep+2;echo+line+2;sleep+2;echo+line+3;sleep+2;echo+line+4+final"
+params="project=${proj}&exec=echo+testing+execution+output+api3v5+line+1;sleep+2;echo+line+2;sleep+2;echo+line+3;sleep+2;echo+line+4+final"
 
 # get listing
 docurl ${runurl}?${params} > $DIR/curl.out
@@ -208,7 +216,7 @@ if [ 0 != $? ] ; then
     exit 2
 fi
 
-sh $DIR/api-test-success.sh $DIR/curl.out || exit 2
+sh $SRC_DIR/api-test-success.sh $DIR/curl.out || exit 2
 
 #select id
 
@@ -245,7 +253,7 @@ while [[ $ddone == "false" && $dc -lt $dmax ]]; do
         exit 2
     fi
 
-    sh $DIR/api-test-success.sh $DIR/curl.out || exit 2
+    sh $SRC_DIR/api-test-success.sh $DIR/curl.out || exit 2
 
     verify_entry_output $DIR/curl.out
     
@@ -272,5 +280,9 @@ if [[ $ddone != "true" ]]; then
     errorMsg "ERROR: not all output was received in $dc requests"
     exit 2
 fi
+
+##wait for exec to finish...
+rd-queue follow -q -e $execid || fail "Waiting for $execid to finish"
+sh $SRC_DIR/api-expect-exec-success.sh $execid || exit 2
 
 echo "OK"

@@ -167,7 +167,7 @@
                 <div>
                     <label class="left ${hasErrors(bean:option,field:'valuesUrl','fieldError')}"><g:radio name="valuesType" value="url" checked="${option?.realValuesUrl || params.valuesType=='url'?true:false}"  id="vtrurl_${rkey}"/> Remote URL:</label>
                     <input type="url" class="right" name="valuesUrl" value="${option?.realValuesUrl?.encodeAsHTML() }" size="60" placeholder="Remote URL" id="vurl_${rkey}"/>
-                    <div class="info note right">A URL to a Remote JSON service. See <a href="${resource(dir: 'docs')}/RunDeck-Guide.html#option-model-provider" target="_blank">RunDeck Guide - Option model provider</a></div>
+                    <div class="info note right">A URL to a Remote JSON service. See <a href="${g.helpLinkUrl(path:'/manual/job-options.html#option-model-provider')}" target="_blank">Rundeck Guide - Option model provider</a></div>
                     <wdgt:eventHandler for="vurl_${rkey}" state="unempty" target="vtrurl_${rkey}" check="true" inline="true" action="keydown"/>
                     <wdgt:eventHandler for="vtrurl_${rkey}" state="unempty" target="vurl_${rkey}" focus="true" inline="true"/>
                 </div>
@@ -196,10 +196,10 @@
             </div>
         </div>
         <div>
-            <span class="prompt">Requirement</span>
+            <span class="prompt"><g:message code="Option.required.label" /></span>
             <div class="presentation">
                 <div>
-                    <span class="info note">Require this option to be specified when running the Job</span>
+                    <span class="info note"><g:message code="Option.required.description" /></span>
                 </div>
                 <div>
                     <label><g:radio name="required" value="false" checked="${!option || !option.required}"/> No</label>

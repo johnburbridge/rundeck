@@ -111,16 +111,21 @@ class MenuController {
         /**
         * redirect to configured start page, or default to Run page
          */
-        def startpage='run'
+        def startpage='jobs'
         if(grailsApplication.config.rundeck.gui.startpage){
             startpage=grailsApplication.config.rundeck.gui.startpage
         }
+        if(params.page){
+            startpage=params.page
+        }
         switch (startpage){
             case 'run':
+            case 'nodes':
                 return redirect(controller:'framework',action:'nodes')
             case 'jobs':
                 return redirect(controller:'menu',action:'jobs')
             case 'history':
+            case 'events':
                 return redirect(controller:'reports',action:'index')
         }
         return redirect(controller:'framework',action:'nodes')
@@ -144,11 +149,12 @@ class MenuController {
         results.reportQueryParams=query.asReportQueryParams()
 
         withFormat{
+            html {
+                results
+            }
             yaml{
                 final def encoded = JobsYAMLCodec.encode(results.nextScheduled as List)
                 render(text:encoded,contentType:"text/yaml",encoding:"UTF-8")
-            }
-            html{ results
             }
             xml{
                 response.setHeader(Constants.X_RUNDECK_RESULT_HEADER,"Jobs found: ${results.nextScheduled?.size()}")
@@ -207,7 +213,6 @@ class MenuController {
     def jobsPicker = {ScheduledExecutionQuery query ->
 
         Framework framework = frameworkService.getFrameworkFromUserSession(session,request)
-        def projects = frameworkService.projects(framework)
         def usedFilter=null
         if(!query){
             query = new ScheduledExecutionQuery()
@@ -240,8 +245,10 @@ class MenuController {
         def filters=qres._filters
         
         def finishq=scheduledExecutionService.finishquery(query,params,qres)
-        
-        def nextExecutions=scheduledExecutionService.nextExecutionTimes(schedlist.findAll { it.scheduled })
+
+        def allScheduled = schedlist.findAll { it.scheduled }
+        def nextExecutions=scheduledExecutionService.nextExecutionTimes(allScheduled)
+        def clusterMap=scheduledExecutionService.clusterScheduledJobs(allScheduled)
         log.debug("listWorkflows(nextSched): "+(System.currentTimeMillis()-rest));
         long running=System.currentTimeMillis()
         
@@ -337,6 +344,7 @@ class MenuController {
         projects:projects,
         nextScheduled:schedlist,
         nextExecutions: nextExecutions,
+                clusterMap: clusterMap,
         jobauthorizations:jobauthorizations,
         authMap:authorizemap,
         nowrunning: nowrunning,
@@ -594,6 +602,9 @@ class MenuController {
         ]]
     }
 
+    def licenses = {->
+
+    }
 
 
     /**
@@ -697,10 +708,14 @@ class MenuController {
         //test valid project
         Framework framework = frameworkService.getFrameworkFromUserSession(session,request)
 
-        def exists=frameworkService.existsFrameworkProject(params.project,framework)
-        if(!exists){
-            flash.error=g.message(code:'api.error.item.doesnotexist',args:['project',params.project])
-            return chain(controller:'api',action:'error')
+        //allow project='*' to indicate all projects
+        def allProjects = request.api_version >= ApiRequestFilters.V9 && params.project == '*'
+        if(!allProjects){
+            def exists=frameworkService.existsFrameworkProject(params.project,framework)
+            if(!exists){
+                flash.error=g.message(code:'api.error.item.doesnotexist',args:['project',params.project])
+                return chain(controller:'api',action:'error')
+            }
         }
 
         QueueQuery query = new QueueQuery(runningFilter:'running',projFilter:params.project)

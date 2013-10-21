@@ -1,7 +1,4 @@
 package rundeck
-
-import org.codehaus.groovy.grails.commons.ConfigurationHolder
-
 /*
  * Copyright 2010 DTO Labs, Inc. (http://dtolabs.com)
  *
@@ -39,6 +36,7 @@ public class Option implements Comparable{
 
     ScheduledExecution scheduledExecution
     String name
+    Integer sortIndex
     String description
     String defaultValue
     Boolean enforced
@@ -61,7 +59,7 @@ public class Option implements Comparable{
     static transients=['valuesList','realValuesUrl']
 
     static constraints={
-        name(nullable:false,blank:false)
+        name(nullable:false,blank:false,matches: '[a-zA-Z_0-9.-]+')
         description(nullable:true)
         defaultValue(nullable:true)
         enforced(nullable:false)
@@ -75,17 +73,25 @@ public class Option implements Comparable{
         multivalued(nullable:true)
         secureInput(nullable:true)
         secureExposed(nullable:true)
+        sortIndex(nullable:true)
     }
 
     static mapping = {
         table "rdoption"
         valuesUrlLong length:3000
+        values type: 'text', lazy: false
+        description type: 'text'
+        defaultValue type: 'text'
+        regex type: 'text'
     }
     /**
      * Return canonical map representation
      */
     public Map toMap(){
         final Map map = [:]
+        if (null!=sortIndex) {
+            map.sortIndex = sortIndex
+        }
         if(enforced){
             map.enforced=enforced
         }
@@ -127,6 +133,9 @@ public class Option implements Comparable{
         opt.required=data.required?true:false
         if(data.description){
             opt.description=data.description
+        }
+        if(data.sortIndex!=null){
+            opt.sortIndex=data.sortIndex
         }
         if(data.value){
             opt.defaultValue = data.value
@@ -205,8 +214,19 @@ public class Option implements Comparable{
         }
     }
 
+    /**
+     * Compare by (sortIndex, name)
+     * @param obj
+     * @return
+     */
     int compareTo(obj) {
-        name.compareTo(obj.name)
+        if (null != sortIndex && null != obj.sortIndex) {
+            return sortIndex <=> obj.sortIndex
+        } else if (null == sortIndex && null == obj.sortIndex) {
+            return name <=> obj.name
+        } else {
+            return sortIndex != null ? -1 : 1
+        }
     }
 
 
@@ -215,7 +235,7 @@ public class Option implements Comparable{
      */
     public Option createClone(){
         Option opt = new Option()
-        ['name','description','defaultValue','enforced','required','values','valuesList','valuesUrl','valuesUrlLong','regex','multivalued','delimiter','secureInput','secureExposed'].each{k->
+        ['name','description','defaultValue','sortIndex','enforced','required','values','valuesList','valuesUrl','valuesUrlLong','regex','multivalued','delimiter','secureInput','secureExposed'].each{k->
             opt[k]=this[k]
         }
         if(!opt.valuesList && values){
@@ -227,6 +247,7 @@ public class Option implements Comparable{
     public String toString ( ) {
         return "Option{" +
         "name='" + name + '\'' +
+        "sortIndex='" + sortIndex + '\'' +
         ", description='" + description + '\'' +
         ", defaultValue='" + defaultValue + '\'' +
         ", enforced=" + enforced +

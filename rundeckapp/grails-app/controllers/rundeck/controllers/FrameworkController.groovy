@@ -8,6 +8,8 @@ import com.dtolabs.rundeck.core.utils.NodeSet
 import com.dtolabs.shared.resources.ResourceXMLGenerator
 
 import grails.converters.JSON
+import rundeck.Execution
+
 import java.util.regex.PatternSyntaxException
 import com.dtolabs.rundeck.core.common.INodeEntry
 import com.dtolabs.rundeck.core.common.INodeSet
@@ -66,10 +68,12 @@ class FrameworkController  {
 
     def noProjectAccess = {
         response.setStatus(403)
+        def roles = request.subject?.getPrincipals(com.dtolabs.rundeck.core.authentication.Group.class)?.collect { it.name }?.join(", ")
         request.title = "Unauthorized"
-        request.error = "No authorized access to projects. Contact your administrator."
+        request.error = "No authorized access to projects. Contact your administrator. (User roles: " + roles + ")"
         response.setHeader(Constants.X_RUNDECK_ACTION_UNAUTHORIZED_HEADER, request.error)
-        log.error("'${request.remoteUser}' has no authorized access. Roles: "+ request.subject?.getPrincipals(com.dtolabs.rundeck.core.authentication.Group.class)?.collect { it.name }?.join(", "))
+
+        log.error("'${request.remoteUser}' has no authorized access. Roles: "+ roles)
         return render(template:  '/common/error', model: [:])
     }
     /**
@@ -91,7 +95,29 @@ class FrameworkController  {
     }
 
     def nodes ={ ExtNodeFilters query ->
+        Framework framework = frameworkService.getFrameworkFromUserSession(session, request)
+        String runCommand;
+        if(params.fromExecId|| params.retryFailedExecId) {
+            Execution e = Execution.get(params.fromExecId?: params.retryFailedExecId)
+            if (e && !frameworkService.authorizeProjectExecutionAll(framework, e, [AuthConstants.ACTION_READ])) {
+                return unauthorized("Read Execution ${params.fromExecId ?: params.retryFailedExecId}")
+            }
 
+            if (e && !e.scheduledExecution && e.workflow.commands.size() == 1) {
+                def cmd = e.workflow.commands[0]
+                if (cmd.adhocRemoteString) {
+                    runCommand = cmd.adhocRemoteString
+                    //configure node filters
+                    if (params.retryFailedExecId) {
+                        query = new ExtNodeFilters(nodeIncludeName: e.failedNodeList, project: e.project)
+                    }else{
+                        query = ExtNodeFilters.from(e, e.project)
+                    }
+                }
+            }
+        }else if(params.exec){
+            runCommand=params.exec
+        }
         def User u = userService.findOrCreateUser(session.user)
         def usedFilter = null
         if (!params.filterName && u && query.nodeFilterIsEmpty() && params.formInput != 'true') {
@@ -119,12 +145,12 @@ class FrameworkController  {
             query = new ExtNodeFilters()
             usedFilter = null
         }
-        Framework framework = frameworkService.getFrameworkFromUserSession(session, request)
+
         if (query.nodeFilterIsEmpty()) {
-            if (params.formInput == 'true' && 'true' != params.defaultLocalNode) {
-                query.nodeIncludeName = '.*'
-            } else {
+            if ('true' == params.defaultLocalNode) {
                 query.nodeIncludeName = framework.getFrameworkNodeName()
+            } else {
+                query.nodeIncludeName = '.*'
             }
         }
         if (query && !query.project && session.project) {
@@ -135,7 +161,7 @@ class FrameworkController  {
         if (usedFilter) {
             model['filterName'] = usedFilter
         }
-        return model
+        return model + [runCommand: runCommand]
     }
     /**
      * Nodes action lists nodes in resources view, also called by nodesFragment to
@@ -591,14 +617,13 @@ class FrameworkController  {
                 projectNameError= "Project name is required"
                 errors << projectNameError
             }else if(!(project=~FrameworkResource.VALID_RESOURCE_NAME_REGEX)){
-                projectNameError= "Project name can only contain these characters: [a-zA-Z0-9_-+.]"
+                projectNameError= message(code:"project.name.can.only.contain.these.characters")
                 errors << projectNameError
             }else if (framework.getFrameworkProjectMgr().existsFrameworkProject(project)){
                 projectNameError= "Project already exists: ${project}"
                 log.error(projectNameError)
                 errors << projectNameError
             }else if(!errors){
-
                 log.debug("create project, properties: ${projProps}");
                 def proj
                 try {
@@ -609,6 +634,7 @@ class FrameworkController  {
                 }
                 if(!errors && proj){
                     session.project=proj.name
+                    session.frameworkProjects = frameworkService.projects(framework)
                     def result=userService.storeFilterPref(session.user, [project:proj.name])
                     return redirect(controller:'menu',action:'index')
                 }
@@ -618,7 +644,6 @@ class FrameworkController  {
 //            request.error=errors.join("\n")
             request.errors=errors
         }
-        def projects=frameworkService.projects(framework)
         final descriptions = framework.getResourceModelSourceService().listDescriptions()
 
         //get list of node executor, and file copier services
@@ -627,7 +652,8 @@ class FrameworkController  {
 
 
 
-        return [projects:projects,project:params.project,
+        return [
+                project:params.project,
             projectNameError: projectNameError,
             resourcesUrl: resourcesUrl,
             resourceModelConfigDescriptions: descriptions,
@@ -992,7 +1018,13 @@ class FrameworkController  {
 
     def projectSelect={
         Framework framework = frameworkService.getFrameworkFromUserSession(session,request)
-        def projects=frameworkService.projects(framework)
+        def projects
+        if(session.frameworkProjects){
+            projects=session.frameworkProjects
+        }else{
+            projects = frameworkService.projects(framework)
+            session.frameworkProjects=projects
+        }
         [projects:projects,project:session.project]
     }
     def selectProject= {

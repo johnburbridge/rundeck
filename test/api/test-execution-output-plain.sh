@@ -11,12 +11,12 @@ source $DIR/include.sh
 
 runurl="${APIURL}/run/command"
 proj="test"
-params="project=${proj}&exec=echo+testing+execution+output+api+line+1;sleep+2;echo+line+2;sleep+2;echo+line+3;sleep+2;echo+line+4+final"
+params="project=${proj}&exec=echo+testing+execution+output+api-plain+line+1;sleep+2;echo+line+2;sleep+2;echo+line+3;sleep+2;echo+line+4+final"
 
 expectfile=$DIR/expect-exec-output-plain.txt
 
 cat > $expectfile <<END
-testing execution output api line 1
+testing execution output api-plain line 1
 line 2
 line 3
 line 4 final
@@ -29,7 +29,7 @@ if [ 0 != $? ] ; then
     exit 2
 fi
 
-sh $DIR/api-test-success.sh $DIR/curl.out || exit 2
+sh $SRC_DIR/api-test-success.sh $DIR/curl.out || exit 2
 
 #select id
 
@@ -115,5 +115,9 @@ if [[  0 != $? ]] ; then
 fi
 
 rm $expectfile $outfile
+
+##wait for exec to finish...
+rd-queue follow -q -e $execid || fail "Waiting for $execid to finish"
+sh $SRC_DIR/api-expect-exec-success.sh $execid || exit 2
 
 echo "OK"

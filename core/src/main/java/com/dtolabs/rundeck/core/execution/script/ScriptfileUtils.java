@@ -159,8 +159,12 @@ public class ScriptfileUtils {
      * Create a temp file in the framework 
      */
     public static File createTempFile(final Framework framework) throws IOException {
-        final File dispatch = File.createTempFile("dispatch", ".tmp", new File(framework.getProperty(
-            "framework.tmp.dir")));
+        String fileExt = ".tmp";
+        if ("windows".equalsIgnoreCase(framework.createFrameworkNode().getOsFamily())) {
+            fileExt = ".tmp.bat";
+        }
+        final File dispatch = File.createTempFile("dispatch", fileExt, new File(framework.getProperty(
+                "framework.tmp.dir")));
         dispatch.deleteOnExit();
         return dispatch;
     }
@@ -173,26 +177,9 @@ public class ScriptfileUtils {
      * @throws IOException if an error occurs
      */
     public static void setExecutePermissions(final File scriptfile) throws IOException {
-        ////////////////////
-        // XXX: the following commented block is available in java 6 only
-        /*if (!scriptfile.setExecutable(true, true)) {
-            warn("Unable to set executable bit on temp script file, execution may fail: " + scriptfile
+        if (!scriptfile.setExecutable(true, true)) {
+            System.err.println("Unable to set executable bit on temp script file, execution may fail: " + scriptfile
                 .getAbsolutePath());
-        }*/
-        ///////////////////
-
-        if (!System.getProperty("os.name").toLowerCase().contains("windows")) {
-            final Process process = Runtime.getRuntime().exec(
-                new String[]{"chmod", "+x", scriptfile.getAbsolutePath()});
-            int result=-1;
-            try {
-                result=process.waitFor();
-            } catch (InterruptedException e) {
-
-            }
-            if(result>0) {
-                throw new IOException("exec returned: " + result);
-            }
         }
     }
 

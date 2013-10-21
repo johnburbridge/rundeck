@@ -1,23 +1,20 @@
-import java.io.File;
-
-import com.dtolabs.rundeck.core.Constants;
-import com.dtolabs.rundeck.core.utils.ThreadBoundOutputStream
-import org.springframework.web.context.support.WebApplicationContextUtils
-import org.springframework.web.context.WebApplicationContext
-import org.apache.log4j.Logger
-import org.apache.log4j.LogManager
-import org.apache.log4j.Level
-import org.apache.log4j.net.SocketAppender
-import grails.util.GrailsUtil
 import com.dtolabs.launcher.Setup
+import com.dtolabs.rundeck.core.Constants
+import com.dtolabs.rundeck.core.utils.ThreadBoundOutputStream
+import grails.util.Environment
 import org.codehaus.groovy.grails.plugins.web.filters.FilterConfig
 import org.codehaus.groovy.grails.plugins.web.filters.FilterToHandlerAdapter
+import org.springframework.web.context.WebApplicationContext
+import org.springframework.web.context.support.WebApplicationContextUtils
 
 class BootStrap {
 
     def grailsApplication
     def scheduledExecutionService
     def executionService
+    def frameworkService
+    def loggingService
+    def logFileStorageService
     def filterInterceptor
 
      def init = { servletContext ->
@@ -33,64 +30,70 @@ class BootStrap {
          if(!grailsApplication.config.rdeck.base){
              //look for system property
              rdeckBase=System.getProperty('rdeck.base')
-             log.warn("using rdeck.base system property: ${rdeckBase}");
+             log.error("using rdeck.base system property: ${rdeckBase}");
+             def newconf= new ConfigObject()
+             newconf.rdeck.base = rdeckBase
+             grailsApplication.config.merge(newconf)
          }else{
              rdeckBase=grailsApplication.config.rdeck.base
-             log.warn("using rdeck.base config property: ${rdeckBase}");
+             log.error("using rdeck.base config property: ${rdeckBase}");
          }
-         if("test"!=GrailsUtil.environment){
-             if(!rdeckBase){
+         frameworkService.rundeckbase = rdeckBase
+         def clusterMode = false
+         def serverNodeUUID = null
+         if (Environment.getCurrent()!=Environment.TEST) {
+             if (!rdeckBase) {
                  throw new RuntimeException("config file did not contain property: rdeck.base")
              }
              servletContext.setAttribute("RDECK_BASE", rdeckBase)
-             log.info("config: rdeck.base = " + rdeckBase)
 
              File basedir = new File(rdeckBase)
-             if(!basedir.isDirectory()) {
+             if (!basedir.isDirectory()) {
                  basedir.mkdir()
              }
              //see if initialization system property is set
              def configDir = Constants.getFrameworkConfigDir(rdeckBase)
              File fprops = new File(configDir, "framework.properties")
-             if (!fprops.exists()){
+             if (!fprops.exists()) {
                  log.info("Performing rundeck first-run initialization...")
                  //setup the base dir
-                 Setup setup=new Setup()
+                 Setup setup = new Setup()
                  setup.getParameters().setBaseDir(basedir.getAbsolutePath())
                  setup.getParameters().setHomeDir(basedir.getAbsolutePath())
                  //determine hostname and port from grails config if available
                  String hostname
                  String port
-                 if(grailsApplication.config.grails.serverURL){
+                 if (grailsApplication.config.grails.serverURL) {
                      URL url = new URL(grailsApplication.config.grails.serverURL)
-                     hostname=url.getHost()
-                     port=url.getPort().toString()
-                     def urlstr= url.toExternalForm().replaceAll('/+$','')
-                     setup.getParameters().properties["framework.server.url"]=urlstr
-                     setup.getParameters().properties["framework.rundeck.url"]= urlstr
-                 }else{
+                     hostname = url.getHost()
+                     port = url.getPort().toString()
+                     def urlstr = url.toExternalForm().replaceAll('/+$', '')
+                     setup.getParameters().properties["framework.server.url"] = urlstr
+                     setup.getParameters().properties["framework.rundeck.url"] = urlstr
+                 } else {
                      //determine hostname
-                     hostname=InetAddress.getLocalHost().getHostName()
-                     if(hostname=~/^[\d\.]+$/){
-                         hostname="localhost"
+                     hostname = InetAddress.getLocalHost().getHostName()
+                     if (hostname =~ /^[\d\.]+$/) {
+                         hostname = "localhost"
                      }
-                     port="4440"
+                     port = "4440"
                  }
+                 setup.getParameters().properties["rundeck.server.uuid"] = UUID.randomUUID().toString()
                  setup.getParameters().setNodeArg(hostname)
-                 setup.getParameters().properties["framework.server.port"]=port
+                 setup.getParameters().properties["framework.server.port"] = port
 
                  setup.performSetup()
                  log.info("Rundeck initialization complete.")
              }
-             if (! fprops.exists()) {
+             if (!fprops.exists()) {
                  throw new RuntimeException("framework configuration file not found: " + fprops.getAbsolutePath())
              }
              InputStream is = new FileInputStream(fprops);
              Properties properties = new Properties()
-             try{
-                properties.load(is)
-             }finally{
-                 if(null!=is){
+             try {
+                 properties.load(is)
+             } finally {
+                 if (null != is) {
                      is.close()
                  }
              }
@@ -99,15 +102,52 @@ class BootStrap {
              servletContext.setAttribute("FRAMEWORK_PROPERTIES", props2)
              log.info("loaded configuration: " + fprops.getAbsolutePath())
 
-             if(properties.containsKey("framework.node")){
-                 servletContext.setAttribute("FRAMEWORK_NODE", properties.getProperty("framework.node"))
+             String nodeName = properties.getProperty("framework.node")
+             if (!nodeName) {
+                 throw new RuntimeException("Expected 'framework.node' in framework.properties: Not found")
              }
+             servletContext.setAttribute("FRAMEWORK_NODE", nodeName)
+             //check cluster mode
+             clusterMode = grailsApplication.config.rundeck.clusterMode.enabled in [true, 'true']
+             servletContext.setAttribute("CLUSTER_MODE_ENABLED", Boolean.toString(clusterMode))
+             if (clusterMode) {
+                 serverNodeUUID = properties.getProperty("rundeck.server.uuid")
+                 if (!serverNodeUUID) {
+                     throw new RuntimeException("Cluster mode: rundeck.clusterMode.enabled is set to 'true', but " +
+                             "'rundeck.server.uuid' not found in framework.properties")
+                 }
+                 try {
+                     UUID.fromString(serverNodeUUID)
+                 } catch (IllegalArgumentException e) {
+                     throw new RuntimeException("Cluster mode: 'rundeck.server.uuid' in framework.properties was not " +
+                             "a valid UUID: ${serverNodeUUID}. ")
+                 }
+                 servletContext.setAttribute("SERVER_UUID", serverNodeUUID)
+                 log.warn("Cluster mode enabled, this server's UUID: ${serverNodeUUID}")
+             }
+             //auth tokens stored in file
+             def tokensfile = properties.getProperty("rundeck.tokens.file")
+             if (tokensfile) {
+                 Properties userTokens = new Properties()
+                 try {
+                     new File(tokensfile).withInputStream {
+                         userTokens.load(it)
+                     }
+                 } catch (IOException e) {
+                     log.error("Unable to load static tokens file: "+e.getMessage())
+                 }
+                 Properties tokens = new Properties()
+                 userTokens.each { k, v ->
+                    tokens[v]=k
+                 }
+                 servletContext.setAttribute("TOKENS_FILE_PATH", new File(tokensfile).absolutePath)
+                 servletContext.setAttribute("TOKENS_FILE_PROPS", tokens)
+                 if (tokens) {
+                     log.debug("Loaded ${tokens.size} tokens from tokens file: ${tokensfile}...")
+                 }
+             }
+
          }
-
-
-         //initialize execution service plugin
-//         com.dtolabs.rundeck.core.execution.ExecutionServiceFactory.instance().setDefaultExecutorClass(WorkflowExecutionItem.class,WorkflowExecutor.class)
-//         com.dtolabs.rundeck.core.execution.ExecutionServiceFactory.instance().setDefaultExecutor(JobExecutionItem.class,executionService)
 
 
          if(grailsApplication.config.loglevel.default){
@@ -166,7 +206,7 @@ class BootStrap {
 
 
          //configure System.out and System.err so that remote command execution will write to a specific print stream
-         if("test"!=GrailsUtil.environment){
+         if(Environment.getCurrent() != Environment.TEST){
              PrintStream oldout = System.out;
              PrintStream olderr = System.err;
 
@@ -181,16 +221,13 @@ class BootStrap {
              appCtx.executionService.sysThreadBoundErr=newErr
              appCtx.executionService.defaultLogLevel=servletContext.getAttribute("LOGLEVEL_DEFAULT")
 
-             executionService.cleanupRunningJobs()
-             scheduledExecutionService.rescheduleJobs()
-             scheduledExecutionService.convertNonWorkflowJobs()
+             executionService.cleanupRunningJobs(clusterMode ? serverNodeUUID : null)
+             if(clusterMode){
+                scheduledExecutionService.claimScheduledJobs(serverNodeUUID)
+             }
+             scheduledExecutionService.rescheduleJobs(clusterMode ? serverNodeUUID : null)
+             logFileStorageService.resumeIncompleteLogStorage(clusterMode ? serverNodeUUID : null)
          }
-
-        
-         if (GrailsUtil.environment == "development") {
-             
-         }
-
      }
 
      def destroy = {

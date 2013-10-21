@@ -70,6 +70,7 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
      */
     public static final String ACTION_PURGE = "purge";
     private StoredJobsRequestDuplicateOption duplicateOption = StoredJobsRequestDuplicateOption.update;
+    private boolean uuidOptionRemove;
 
     /**
      * Get action
@@ -164,6 +165,14 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
         return duplicateOption;
     }
 
+    public String getProject() {
+        return getArgProject();
+    }
+
+    public StoredJobsRequestUUIDOption getUUIDOption() {
+        return uuidOptionRemove ? StoredJobsRequestUUIDOption.remove : StoredJobsRequestUUIDOption.preserve;
+    }
+
     /**
      * Return group option value
      *
@@ -229,11 +238,11 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
         /**
          * load action
          */
-        load(ACTION_PURGE),
+        load(ACTION_LOAD),
         /**
          * load action
          */
-        purge(ACTION_LOAD);
+        purge(ACTION_PURGE);
         private String name;
 
         Actions(final String name) {
@@ -328,6 +337,15 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
      * long option string for load option: duplicate
      */
     public static final String DUPLICATE_OPTION_LONG = "duplicate";
+
+    /**
+     * long option to remove UUIDs when importing jobs
+     */
+    public static final String REMOVE_UUID_OPTION_SHORT = "r";
+    /**
+     * long option to remove UUIDs when importing jobs
+     */
+    public static final String REMOVE_UUID_OPTION_LONG = "remove-uuids";
 
     /**
      * short option string for load option: format
@@ -435,6 +453,8 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
             options.addOption(VERBOSE_OPTION, VERBOSE_OPTION_LONG, false, "Enable verbose output");
             options.addOption(FORMAT_OPTION, FORMAT_OPTION_LONG, true,
                 "Format for input/output file. One of: " + Arrays.toString(JobDefinitionFileFormat.values()));
+            options.addOption(PROJECT_OPTION, PROJECT_OPTION_LONG, true,
+                    "Project name. List jobs within this project, or import jobs to this project.");
         }
 
         public void parseArgs(final CommandLine cli, final String[] original) throws CLIToolOptionsException {
@@ -463,6 +483,8 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
         public void addOptions(final Options options) {
             options.addOption(DUPLICATE_OPTION, DUPLICATE_OPTION_LONG, true,
                 "Duplicate job behavior option. When loading jobs, treat definitions that already exist on the server in the given manner: 'update' existing jobs,'skip' the uploaded definitions, or 'create' them anyway. (load action. default: update)");
+            options.addOption(REMOVE_UUID_OPTION_SHORT, REMOVE_UUID_OPTION_LONG, false,
+                "When loading jobs, remove any UUIDs while importing. (load action. default: false)");
         }
 
         public void parseArgs(final CommandLine cli, final String[] original) throws CLIToolOptionsException {
@@ -476,6 +498,7 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
                         + Arrays.toString(StoredJobsRequestDuplicateOption.values()));
                 }
             }
+            uuidOptionRemove = cli.hasOption(REMOVE_UUID_OPTION_SHORT);
         }
 
         public void validate(final CommandLine cli, final String[] original) throws CLIToolOptionsException {
@@ -490,10 +513,6 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
                 }
                 if (null != argIdlist) {
                     warn("load action: -" + IDLIST_OPTION + "/--" + IDLIST_OPTION_LONG
-                         + " option only valid with list action");
-                }
-                if (null != argProject) {
-                    warn("load action: -" + PROJECT_OPTION + "/--" + PROJECT_OPTION_LONG
                          + " option only valid with list action");
                 }
                 if (null == argFile) {
@@ -522,8 +541,6 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
                 "Group name. List jobs within this group or sub-group (list/purge action)");
             options.addOption(IDLIST_OPTION, IDLIST_OPTION_LONG, true,
                 "Job ID List. List Jobs with these IDs explicitly. Comma-separated, e.g.: 1,2,3. (list/purge action)");
-            options.addOption(PROJECT_OPTION, PROJECT_OPTION_LONG, true,
-                "Project name. List jobs within this project. (list/purge action)");
 
         }
 
@@ -644,7 +661,8 @@ public class JobsTool extends BaseTool implements IStoredJobsQuery, ILoadJobsReq
                + "rd-jobs purge -p <project> [query options] : Delete jobs from the project matching the options\n"
                + "rd-jobs purge -p <project> --file <file> [query options] : Delete jobs from the project matching the options, after saving them to a file\n"
                + "\tLoad action:\n"
-               + "rd-jobs load --file <file> : load jobs stored in XML file\n"
+               + "rd-jobs load --file <file> : load jobs stored in XML file, require each to define its project\n"
+               + "rd-jobs load -p <project> --file <file> : load jobs stored in XML file to specific project\n"
                + "rd-jobs load --file <file> -F yaml : load jobs stored in YAML file";
     }
 

@@ -32,12 +32,7 @@
     <g:javascript library="prototype/effects"/>
     <g:javascript library="resourceModelConfig"/>
     <g:javascript>
-    function _menuDidSelectProject(value){
-        //successfully set project value
-        if(value){
-            document.location="${createLink(action: 'index', controller: 'menu')}";
-        }
-    }
+
     var configControl;
     function init(){
         configControl=new ResourceModelConfigControl('${prefixKey.encodeAsJavaScript()}');
@@ -85,10 +80,10 @@
             </ul>
         </g:if>
     </div>
-    <div class="pageBody form" style="width:500px;" id="createform">
+    <div class="pageBody form" id="createform">
         <g:form action="saveProject" method="post" onsubmit="return configControl.checkForm();">
             <g:render template="editProjectForm" model="${[editOnly:true,project:session.project]}"/>
-            <div class="buttons">
+            <div class="buttons primary">
                 <g:submitButton name="cancel" value="${g.message(code:'button.action.Cancel',default:'Cancel')}" />
                 <g:submitButton name="save" value="${g.message(code:'button.action.Save',default:'Save')}" />
             </div>

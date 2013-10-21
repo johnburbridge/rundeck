@@ -7,11 +7,11 @@
 </head>
 <body>
 
-    <div class="pageTop">
+    <div class="pageTop obs_delete_hide">
         <span class="welcomeMessage">
         Edit <g:message code="domain.ScheduledExecution.title"/>
         </span>
     </div>
-    <tmpl:editForm model="[scheduledExecution:scheduledExecution,crontab:crontab,authorized:authorized]"/>
+    <tmpl:editForm model="[scheduledExecution:scheduledExecution,crontab:crontab,authorized:authorized, notificationPlugins: notificationPlugins]"/>
 </body>
 </html>

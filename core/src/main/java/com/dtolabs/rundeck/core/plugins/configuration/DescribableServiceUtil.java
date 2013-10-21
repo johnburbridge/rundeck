@@ -26,8 +26,8 @@ package com.dtolabs.rundeck.core.plugins.configuration;
 
 import com.dtolabs.rundeck.core.common.ProviderService;
 import com.dtolabs.rundeck.core.execution.service.ExecutionServiceException;
-import com.dtolabs.rundeck.core.execution.workflow.steps.StepExecutor;
 import com.dtolabs.rundeck.core.plugins.ProviderIdent;
+import com.dtolabs.rundeck.plugins.util.DescriptionBuilder;
 
 import java.util.*;
 
@@ -40,6 +40,11 @@ import java.util.*;
 public class DescribableServiceUtil {
 
     public static <T> List<Description> listDescriptions(final ProviderService<T> service) {
+        return listDescriptions(service, true);
+    }
+
+    public static <T> List<Description> listDescriptions(final ProviderService<T> service,
+                                                         final boolean includeFieldProperties) {
         final ArrayList<Description> list = new ArrayList<Description>();
         for (final ProviderIdent providerIdent : service.listProviders()) {
             try {
@@ -50,6 +55,9 @@ public class DescribableServiceUtil {
                     if (null != description) {
                         list.add(description);
                     }
+                } else if (PluginAdapterUtility.canBuildDescription(providerForType)) {
+                    list.add(PluginAdapterUtility.buildDescription(providerForType, DescriptionBuilder.builder(),
+                            includeFieldProperties));
                 }
             } catch (ExecutionServiceException e) {
                 e.printStackTrace();
@@ -70,6 +78,8 @@ public class DescribableServiceUtil {
                     if (null != description) {
                         list.add(providerIdent);
                     }
+                }else if(PluginAdapterUtility.canBuildDescription(providerForType)){
+                    list.add(providerIdent);
                 }
             } catch (ExecutionServiceException e) {
                 e.printStackTrace();

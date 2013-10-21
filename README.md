@@ -1,8 +1,9 @@
-RunDeck
+Rundeck
 ========
 
-RunDeck is a command dispatcher with a modern web console.
-It lets you easily run commands across a set of nodes.
+Rundeck is an open source automation service with a web console, 
+command line tools and a WebAPI.
+It lets you easily run automation tasks across a set of nodes.
 
 For more information, mailing lists, IRC channel, visit <http://rundeck.org>
 
@@ -11,7 +12,7 @@ See the [Release Notes](RELEASE.md) for the latest version information.
 To Build:
 =====
 
-Primary build is supported with either gradle or maven2+. (Note: to include docs for the launcher, do `make clean docs` first.)
+Primary build is supported with either gradle or maven2+. 
 
 Gradle Build
 =====
@@ -20,7 +21,7 @@ Gradle Build
 
 Artifacts: 
 
-* `rundeckapp/build/libs/rundeck-X.Y.war`
+* `rundeckapp/target/rundeck-X.Y.war`
 * `rundeck-launcher/launcher/build/libs/rundeck-launcher-X.Y.jar`
 
 Maven2 Build
@@ -33,7 +34,10 @@ Artifacts:
 * `rundeckapp/target/rundeck-X.Y.war`
 * `rundeck-launcher/launcher/target/rundeck-launcher-X.Y.jar`
 
-Note: the underlying Grails build requires the MaxPermSize to be increased in the MAVEN_OPTS as shown above.
+Notes: 
+
+* the underlying Grails build requires the MaxPermSize to be increased in the MAVEN_OPTS as shown above.
+* to include docs for the launcher, do `make clean docs` first.)
 
 
 Other builds
@@ -43,7 +47,8 @@ The documentation can be built with [pandoc](http://johnmacfarlane.net/pandoc/).
     
 Build the documentation. Artifacts in `docs/en/dist`:
 
-    make docs
+    cd docs
+    make
 
 You can build .rpm or .deb files (requires pandoc to build the docs):
 
@@ -62,11 +67,11 @@ To build clean:
 Installation
 ======
 
-There are two install options, a self-contained jar file, or RPM.
+There are several install options: a self-contained jar file, or RPM, or Debian.
 
 To start from the rundeck-launcher.jar, put it in a directory named ~/rundeck, then execute:
 
-    java -jar rundeck-launcher-1.1.0.jar
+    java -jar rundeck-launcher-1.6.0.jar
 
 If you'd like to install via RPM, you can use Yum:
 
@@ -75,7 +80,7 @@ If you'd like to install via RPM, you can use Yum:
 
 OR install directly from RPM:
 
-    rpm -ivh rundeck-1.1.0-xxx.rpm
+    rpm -ivh rundeck-1.6.0-xxx.rpm rundeck-config-1.6.0-xxx.rpm
 
 Once the RPM is installed, execute:
 
@@ -83,12 +88,16 @@ Once the RPM is installed, execute:
 
 The server should launch on port 4440, with default username/password of `admin/admin`.
 
-* For more info and configuration information, see the [RunDeck Guide](http://rundeck.org/docs/RunDeck-Guide.html)
+For Debian, download the .deb from the [downloads page](http://rundeck.org/downloads.html), then run:
+
+    dpkg -i rundeck-1.6.x-x.deb
+
+* For more info and configuration information, see the [Rundeck docs](http://docs.rundeck.org).
 
 Requirements
 =======
 
-Java 5 (openjdk, sun)
+Java 6 (openjdk, sun)
 
 [Pandoc](http://johnmacfarlane.net/pandoc/) (documentation build only)
 
@@ -110,7 +119,7 @@ Do you have changes to contribute? Please see the [Development](https://github.c
 License
 ======
 
-Copyright 2011 DTO Solutions
+Copyright 2013 SimplifyOps
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

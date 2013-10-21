@@ -43,15 +43,24 @@ class UrlMappings {
         "/api/$api_version/run/script"(controller: 'scheduledExecution', action: 'apiRunScript')
         "/api/$api_version/run/url"(controller: 'scheduledExecution', action: 'apiRunScriptUrl')
         "/api/$api_version/system/info"(controller: 'api', action: 'apiSystemInfo')
+
+        //incubator endpoints
+        "/api/$api_version/incubator/jobs/takeoverSchedule"(controller: 'scheduledExecution', action: 'apiJobClusterTakeoverSchedule')
+
+        //catchall
         "/api/$api_version/$action?"(controller: 'api', action: 'invalid')
 
         //simplified url mappings for link generation
-        "/run/$id?"(controller: 'framework', action: 'nodes')
-        "/history/$id?"(controller: 'reports', action: 'index')
+        "/nodes/"(controller: 'framework', action: 'nodes')
+        "/run/"(controller: 'framework', action: 'nodes')
+        "/activity"(controller: 'reports', action: 'index')
+        "/history"(controller: 'reports', action: 'index')
         "/jobs/$groupPath**?"(controller: 'menu', action: 'jobs')
+        "/job/show/$id/$fullName**?"(controller: 'scheduledExecution',action: 'show')
         "/job/$action?/$id?"(controller: 'scheduledExecution')
         "/resources/$action?/$id?"(controller: 'framework')
         "/events/$action?/$id?"(controller: 'reports')
+        "/configure"(controller: 'menu', action: 'admin')
         "500"(view: '/error')
     }
 }

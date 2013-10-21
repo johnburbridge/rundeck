@@ -320,16 +320,19 @@ class WorkflowController {
      */
     Map _applyWFEditAction (Workflow editwf, Map input){
         def result = [:]
-
         def createItemFromParams={params->
             def item
             if (params.pluginItem) {
                 item = new PluginStep()
+                item.keepgoingOnSuccess=params.keepgoingOnSuccess
                 item.type = params.newitemtype
                 item.nodeStep = params.newitemnodestep == 'true'
                 item.configuration = params.pluginConfig
             } else if (params.jobName || 'job' == params.newitemtype) {
                 item = new JobExec(params)
+                if (params.nodeStep instanceof String) {
+                    item.nodeStep = params.nodeStep == 'true'
+                }
             } else {
                 item = new CommandExec(params)
 
@@ -343,16 +346,22 @@ class WorkflowController {
         }
         def modifyItemFromParams={moditem,params->
             if (params.pluginItem) {
+                moditem.properties=params.subMap(['keepgoingOnSuccess'])
                 moditem.configuration = params.pluginConfig
             } else {
+                if(params.nodeStep instanceof String) {
+                    params.nodeStep = params.nodeStep == 'true'
+                }
                 moditem.properties = params
+                if (params.jobName) {
+                    moditem.nodeStep=params.nodeStep
+                }
                 def optsmap = ExecutionService.filterOptParams(input.params)
                 if (optsmap) {
                     moditem.argString = ExecutionService.generateArgline(optsmap)
                     //TODO: validate input options
                 }
             }
-
 
         }
 
@@ -441,9 +450,6 @@ class WorkflowController {
             def WorkflowStep item = editwf.commands.get(numi)
             def ehitem= createItemFromParams(input.params)
             _validateCommandExec(ehitem, params.newitemtype)
-            if(item.nodeStep && !ehitem.nodeStep){
-                ehitem.errors.rejectValue('nodeStep', 'Workflow.stepErrorHandler.nodeStep.invalid')
-            }
             if (ehitem.errors.hasErrors()) {
                 return [error: ehitem.errors.allErrors.collect {g.message(error: it)}.join(","), item: ehitem]
             }

@@ -2,10 +2,11 @@
 
 **Note:** The underlying security mechanism relies on JAAS, so you are free to use what ever JAAS provider you feel is suitable for your environment. See [JAAS](http://en.wikipedia.org/wiki/Java_Authentication_and_Authorization_Service) and specifically for Jetty, [JAAS for Jetty](http://docs.codehaus.org/display/JETTY/JAAS).
 
-Rundeck has two basic ways of defining authentication.
+Rundeck has three basic ways of defining authentication.
 
 1. A text file containing usernames, passwords and role definitions. Usually called [realm.properties](#realm.properties).
 2. [LDAP](#ldap)
+3. [PAM](#pam)
 
 By default a new installation uses the realm.properties method.
 
@@ -250,13 +251,13 @@ activedirectory {
 
 #### Communicating over secure ldap (ldaps://)
 
-The default port for communicating with active directory is 389, which is insecure.  The secure port is 686, but the LoginModule describe above requires that the AD certificate or organizations CA certificate be placed in a truststore.  The truststore provided with rundeck `/etc/rundeck/ssl/truststore` is used for the local communication between the cli tools and the rundeck server.
+The default port for communicating with active directory is 389, which is insecure.  The secure port is 636, but the LoginModule describe above requires that the AD certificate or organizations CA certificate be placed in a truststore.  The truststore provided with rundeck `/etc/rundeck/ssl/truststore` is used for the local communication between the cli tools and the rundeck server.
 
 Before you can establish trust, you need to get the CA certificate.  Typically, this would require a request to the organization's security officer to have them send you the certificate.  It's also often found publicly if your organization does secure transactions.
 
 Another option is to interrogate the secure ldap endpoint with openssl.  The example below shows a connection to paypal.com on port 443.  The first certificate is the machine and that last is the CA.  Pick the last certificate.  
 
-*note* that for Active Directory, the host would be the Active Directory server and port 686.  
+*note* that for Active Directory, the host would be the Active Directory server and port 636.  
 *note* Certificates are PEM encoded and start with -----BEGIN CERTIFICATE----- end with -----END CERTIFICATE----- inclusive.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -382,7 +383,7 @@ To verify your CA has been added, run keytool list and look for CompanyAD in the
 
 Refer to: http://download.oracle.com/javase/1.5.0/docs/tooldocs/solaris/keytool.html for more information how how to import a certificate.
 
-Finally, in your `ldap-activedirectory.conf` be sure to change the *providerUrl* to be `ldaps://ad-server`.  Including the port is optional as the default is 686.
+Finally, in your `ldap-activedirectory.conf` be sure to change the *providerUrl* to be `ldaps://ad-server`.  Including the port is optional as the default is 636.
 
 #### Redundant Connection Options
 
@@ -391,6 +392,81 @@ Finally, in your `ldap-activedirectory.conf` be sure to change the *providerUrl*
      providerUrl=ldaps://ad1 ldaps://ad2  
 
 Use this to provide connection redundancy if a particular host is unavailable.
+
+### PAM
+
+Rundeck includes a [PAM](https://en.wikipedia.org/wiki/Pluggable_authentication_module) JAAS login module, which uses [libpam4j](https://github.com/kohsuke/libpam4j) to authenticate.
+
+This module can work with existing properties-file based authorization roles by enabling shared credentials between the modules, and introducing a Property file module that can be used only for authorization.
+
+Modules:
+
+* `org.rundeck.jaas.jetty.JettyPamLoginModule` authenticates via PAM, can add a default set of roles to authenticated users, and can use local unix group membership for role info.
+* `org.rundeck.jaas.jetty.JettyAuthPropertyFileLoginModule` authenticates via property file, but does not supply user authorization information.
+* `org.rundeck.jaas.jetty.JettyRolePropertyFileLoginModule` does not authenticate and only uses authorization roles from a property file. Can be combined with previous modules.
+
+sample jaas config:
+
+    RDpropertyfilelogin {
+      org.rundeck.jaas.jetty.JettyPamLoginModule requisite
+            debug="true"
+            service="sshd"
+            supplementalRoles="readonly"
+            storePass="true";
+
+        org.rundeck.jaas.jetty.JettyRolePropertyFileLoginModule required
+            debug="true"
+            useFirstPass="true"
+            file="/etc/rundeck/realm.properties";
+
+    };
+
+When combining the two login modules, note that the `storePass` and 
+`useFirstPass` are set to true, allowing the two modules to share the user information necessary for the second module to load the user roles.
+
+**Common configuration properties:**
+
+These JAAS configuration properties are used by all of the Jetty PAM modules:
+
+* `useFirstPass`
+* `tryFirstPass`
+* `storePass`
+* `clearPass`
+* `debug`
+
+#### JettyPamLoginModule
+
+Configuration properties:
+
+* `serviceName` - name of the PAM service configuration to use. (Required). Example: "sshd".
+* `useUnixGroups` - true/false. If true, the unix Groups defined for the user will be included as authorization roles. Default: false.
+* `supplementalRoles` - a comma-separated list of additional user roles to add to any authenticated user. Example: 'user,readonly'
+
+
+#### JettyRolePropertyFileLoginModule
+
+This module does not authenticate, and requires that `useFirstPass` or `tryFirstPass` is set to `true`, and that a previous module has `storePass` set to `true`.
+
+It then looks the username up in the Properties file, and applies any roles for the matching user, if found.
+
+Configuration properties:
+
+* `file` - path to a Java Property formatted file in the format defined under [realm.properties](#realm.properties)
+
+Note that since the user password is not used for authentication, you can have a dummy value in the password field of the file, but *some value is required* in that position.
+
+Example properties file with dummy passwords and roles:
+
+    admin: -,user,admin
+    user1: -,user,readonly
+
+#### JettyAuthPropertyFileLoginModule
+
+This module provides authentication in the same way as the [realm.properties](#realm.properties) mechanism, but does not use any of the role names found in the file.  It can be combined with `JettyRolePropertyFileLoginModule` by using `storePass=true`.
+
+Configuration properties:
+
+* `file` - path to a Java Property formatted file in the format defined under [realm.properties](#realm.properties)
 
 ### Multiple Authentication Modules
 

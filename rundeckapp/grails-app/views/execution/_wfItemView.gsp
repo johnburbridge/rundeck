@@ -29,13 +29,24 @@
             <g:if test="${jobitem}">
                 <g:set var="foundjob" value="${edit?null:ScheduledExecution.findScheduledExecution(item.jobGroup?item.jobGroup:null,item.jobName,project)}"/>
                 <g:if test="${foundjob}">
-                <g:link controller="scheduledExecution" action="show" id="${foundjob.extid}"><g:if test="${!noimgs}"><g:img file="icon-small-job.png" width="16px" height="16px"/> </g:if>${item.jobGroup?item.jobGroup.encodeAsHTML()+'/':''}${item.jobName.encodeAsHTML()}</g:link>
+                <g:link controller="scheduledExecution" action="show" id="${foundjob.extid}">
+                    <g:if test="${!noimgs}"><g:img file="icon-small-job.png" width="16px" height="16px"/></g:if>
+                    ${item.jobGroup?item.jobGroup.encodeAsHTML()+'/':''}${item.jobName.encodeAsHTML()}
+                </g:link>
                 </g:if>
                 <g:else>
-                <g:if test="${!noimgs}"><g:img file="icon-small-job.png" width="16px" height="16px"/> </g:if>${item.jobGroup?item.jobGroup.encodeAsHTML()+'/':''}${item.jobName.encodeAsHTML()}
+                    <g:if test="${!noimgs}"><g:img file="icon-small-job.png" width="16px" height="16px"/></g:if>
+                    ${item.jobGroup?item.jobGroup.encodeAsHTML()+'/':''}${item.jobName.encodeAsHTML()}
                 </g:else>
                 <g:if test="${item.argString}">
-                   <span class="argString"><g:truncate max="50"  showtitle="true">${item.argString.encodeAsHTML()}</g:truncate></span>
+                   <span class="argString"><g:truncate max="150"  showtitle="true">${item.argString.encodeAsHTML()}</g:truncate></span>
+                </g:if>
+                <g:if test="${item.nodeStep}">
+                    <g:if test="${!noimgs && item.nodeStep}"><g:img file="icon-small-Node.png" width="16px"
+                                                                    height="16px"/></g:if>
+                    <span class="info note" title="${g.message(code:'JobExec.nodeStep.true.description').encodeAsHTML()}">
+                        <g:message code="JobExec.nodeStep.true.label" />
+                    </span>
                 </g:if>
             </g:if>
             <g:elseif test="${pluginitem}">
@@ -50,23 +61,38 @@
             <g:else>
                 <g:if test="${!noimgs}"><g:img file="icon-small-shell.png" width="16px" height="16px"/></g:if>
                 <g:if test="${item.adhocRemoteString}">
-                    <span class="argString"><g:truncate max="60" showtitle="true">${item.adhocRemoteString.encodeAsHTML()}</g:truncate></span>
+                    <span class="argString"><g:truncate max="150" showtitle="true">${item.adhocRemoteString.encodeAsHTML()}</g:truncate></span>
                 </g:if>
                 <g:elseif test="${item.adhocLocalString}">
-                    <g:render template="/execution/scriptDetailDisplay" model="${[script:item.adhocLocalString,label:'Script: ']}"/>
+                    <g:if test="${item.scriptInterpreter}">
+                        <span class="argString">${item.scriptInterpreter.encodeAsHTML()}</span>
+                        <g:if test="${item.interpreterArgsQuoted}">
+                            &quot;
+                        </g:if>
+                    </g:if>
+                    <g:render template="/execution/scriptDetailDisplay" model="${[script:item.adhocLocalString,label:'Script: ',edit:edit]}"/>
                 </g:elseif>
                 <g:elseif test="${item.adhocFilepath}">
+                    <g:if test="${item.scriptInterpreter}">
+                        <span class="argString">${item.scriptInterpreter.encodeAsHTML()}</span>
+                        <g:if test="${item.interpreterArgsQuoted}">
+                            &quot;
+                        </g:if>
+                    </g:if>
                     <g:if test="${item.adhocFilepath=~/^https?:/}">
                         <g:set var="urlString" value="${item.adhocFilepath.replaceAll('^(https?://)([^:@/]+):[^@/]*@', '$1$2:****@')}"/>
-                        <span class="argString"><g:truncate max="60"
+                        <span class="argString"><g:truncate max="150"
                                                             showtitle="true">${urlString.encodeAsHTML()}</g:truncate></span>
                     </g:if>
                     <g:else>
-                        <span class="argString"><g:truncate max="60"  showtitle="true">${item.adhocFilepath.encodeAsHTML()}</g:truncate></span>
+                        <span class="argString"><g:truncate max="150"  showtitle="true">${item.adhocFilepath.encodeAsHTML()}</g:truncate></span>
                     </g:else>
                 </g:elseif>
                 <g:if test="${item.argString}">
-                   <span class="argString"><g:truncate max="45"  showtitle="true">${item.argString.encodeAsHTML()}</g:truncate></span>
+                   <span class="argString"><g:truncate max="150"  showtitle="true">${item.argString.encodeAsHTML()}</g:truncate></span>
+                </g:if>
+                <g:if test="${item.interpreterArgsQuoted}">
+                    &quot;
                 </g:if>
             </g:else>
             </span>

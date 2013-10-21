@@ -51,6 +51,16 @@ public class Validator {
         public boolean isValid() {
             return 0 == errors.size();
         }
+
+        @Override
+        public String toString() {
+            if(isValid()) {
+                return "Property validation OK.";
+            }else{
+                return "Property validation FAILED. " +
+                        "errors=" + errors ;
+            }
+        }
     }
 
     /**
@@ -64,8 +74,25 @@ public class Validator {
     public static Report validate(final Properties props, final Description desc) {
         final Report report = new Report();
         final List<Property> properties = desc.getProperties();
+        validate(props, report, properties, null);
+        return report;
+    }
+
+
+    /**
+     * Validate, ignoring properties below a scope, if set
+     * @param props
+     * @param report
+     * @param properties
+     * @param ignoredScope
+     */
+    private static void validate(Properties props, Report report, List<Property> properties, PropertyScope ignoredScope) {
         if(null!=properties){
             for (final Property property : properties) {
+                if (null != ignoredScope && property.getScope() != null
+                        && property.getScope().compareTo(ignoredScope) <= 0) {
+                    continue;
+                }
                 final String key = property.getName();
                 final String value = props.getProperty(key);
                 if (null == value || "".equals(value)) {
@@ -88,7 +115,46 @@ public class Validator {
                 }
             }
         }
+    }
+
+    /**
+     * Validate a set of properties for a description, and return a report.
+     *
+     * @param resolver     property resolver
+     * @param description  description
+     * @param defaultScope default scope for properties
+     *
+     * @return the validation report
+     */
+    public static Report validate(final PropertyResolver resolver, final Description description,
+            PropertyScope defaultScope) {
+        return validate(resolver, description, defaultScope, null);
+    }
+
+    /**
+     * Validate a set of properties for a description, and return a report.
+     *
+     * @param resolver     property resolver
+     * @param description  description
+     * @param defaultScope default scope for properties
+     * @param ignoredScope ignore properties at or below this scope, or null to ignore none
+     * @return the validation report
+     */
+    public static Report validate(final PropertyResolver resolver, final Description description,
+            PropertyScope defaultScope, PropertyScope ignoredScope) {
+        final Report report = new Report();
+        final List<Property> properties = description.getProperties();
+
+        final Map<String, Object> inputConfig = PluginAdapterUtility.mapDescribedProperties(resolver, description,
+                defaultScope);
+        validate(asProperties(inputConfig), report, properties, ignoredScope);
         return report;
+    }
+
+    private static Properties asProperties(Map<String, Object> inputConfig) {
+        Properties configuration = new Properties();
+        configuration.putAll(inputConfig);
+        return configuration;
     }
 
     /**

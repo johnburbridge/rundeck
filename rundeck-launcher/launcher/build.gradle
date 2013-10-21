@@ -12,8 +12,8 @@ archivesBaseName = 'rundeck-launcher'
 defaultTasks 'clean','launcherJar'
 ext.launcherMainClass = mainClassName
 ext.launcherStartClass = "com.dtolabs.rundeck.RunServer"
-ext.launcherJettyLibs = "servlet-api-2.5-20081211.jar jetty-${jettyVersion}.jar jetty-util-${jettyVersion}.jar jetty-naming-${jettyVersion}.jar jetty-plus-${jettyVersion}.jar"
-ext.launcherJettyLibsUnexpanded = 'servlet-api-2.5-20081211.jar jetty-${jettyVersion}.jar jetty-util-${jettyVersion}.jar jetty-naming-${jettyVersion}.jar jetty-plus-${jettyVersion}.jar'
+ext.launcherJettyLibs = "servlet-api-2.5-20081211.jar jetty-${jettyVersion}.jar jetty-util-${jettyVersion}.jar jetty-naming-${jettyVersion}.jar jetty-plus-${jettyVersion}.jar jna-3.2.2.jar libpam4j-1.5.jar not-yet-commons-ssl-0.3.11.jar"
+ext.launcherJettyLibsUnexpanded = 'servlet-api-2.5-20081211.jar jetty-${jettyVersion}.jar jetty-util-${jettyVersion}.jar jetty-naming-${jettyVersion}.jar jetty-plus-${jettyVersion}.jar jna-3.2.2.jar libpam4j-1.5.jar not-yet-commons-ssl-0.3.11.jar'
 ext.launcherJettyLibPath = "pkgs/webapp/WEB-INF/lib"
 
 ext.launcherContentsDir = new File("$projectDir/build/launcher-contents")
@@ -29,26 +29,21 @@ configurations{
 }
 
 dependencies {
-    compile project(":rundeck-launcher:rundeck-jetty-server")
-    compile(
-        //[group: 'log4j', name: 'log4j', version: '1.2.16',ext:'jar'],
-        [group: 'commons-cli', name: 'commons-cli', version: '1.0',ext:'jar'],
-    )
+    compile project(":rundeck-launcher:rundeck-jetty-server"),
+		'commons-cli:commons-cli:1.0'
 	
-    warBundle(
-        project(':rundeckapp')
-    )
+    warBundle project(':rundeckapp')
 	
-    pluginFiles(
-        project(':plugins:script-plugin'),
+    pluginFiles project(':plugins:script-plugin'),
         project(':plugins:stub-plugin'),
         project(':plugins:localexec-plugin')
-    )
-	
+
     jettyServerLib(project(path:":rundeck-launcher:rundeck-jetty-server", configuration:'runtime')) {
         exclude module:'commons-cli'
         transitive = true
-
+    }
+    jettyServerLib("org.kohsuke:libpam4j:1.5"){
+        transitive = true
     }
 }
 
@@ -66,6 +61,7 @@ task expandCli(dependsOn: setupLauncherContent) << {
         into launcherContentsDir
     }
 }
+
 task expandWar(dependsOn: setupLauncherContent) << {
     //copy libs to a tools lib dir
     File webappDir=new File(launcherContentsDir,"pkgs/webapp")
@@ -86,6 +82,7 @@ task copyJettyServerLib(dependsOn: setupLauncherContent) << {
         into libDir
     }
 }
+
 task copyPluginLibs(dependsOn: setupLauncherContent) << {
     File libextDir=new File(launcherContentsDir,"libext")
     libextDir.mkdirs()
@@ -96,7 +93,6 @@ task copyPluginLibs(dependsOn: setupLauncherContent) << {
         }
     }
 }
-
 
 jar {
     from launcherContentsDir
@@ -211,3 +207,4 @@ task createPom << {
         }
     }.writeTo("pom.xml")
 }
+

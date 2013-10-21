@@ -15,6 +15,8 @@
  */
 package com.dtolabs.rundeck.core.utils;
 
+import com.dtolabs.rundeck.core.common.PropertyRetriever;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -128,6 +130,26 @@ public class PropertyLookup implements IPropertyLookup {
         }
     }
 
+    public PropertyRetriever safe() {
+        return safePropertyRetriever(this);
+    }
+    /**
+     * Create a PropertyRetriever from a PropertyLookup that will not throw exception
+     * @param lookup
+     * @return
+     */
+    public static PropertyRetriever safePropertyRetriever(final IPropertyLookup lookup){
+        return new PropertyRetriever() {
+            public String getProperty(String name) {
+                if(lookup.hasProperty(name)) {
+                    return lookup.getProperty(name);
+                }else {
+                    return null;
+                }
+            }
+        };
+    }
+
     /**
      * Check if property exists in file
      *
@@ -178,13 +200,14 @@ public class PropertyLookup implements IPropertyLookup {
     /**
      * Calls {@link PropertyUtil#expand(Map)} to expand all properties.
      */
-    public void expand() {
+    public PropertyLookup expand() {
         try {
             final Properties expanded = PropertyUtil.expand(properties);
             properties.putAll(expanded);
         } catch (Exception e) {
             throw new PropertyLookupException("failed expanding properties", e);
         }
+        return this;
     }
 
     /**

@@ -173,6 +173,7 @@
 </g:if>
 <div style="margin-top:10px;" class="pageBody form">
     <g:form method="post" action="upload" enctype="multipart/form-data">
+        <g:hiddenField name="project" value="${session.project}"/>
         <g:if test="${!didupload}">
         <span class="prompt">Upload File</span>
         </g:if>
@@ -216,15 +217,34 @@
 
                 <div>
                     <g:radio name="dupeOption" value="create" id="dupeOption3"  checked="${params.dupeOption=='create'}"/>
-                    <label for="dupeOption3"><em>Create</em> a new <g:message code="domain.ScheduledExecution.title"/></label>
+                    <label for="dupeOption3">Always <em>Create</em> a new <g:message code="domain.ScheduledExecution.title"/></label>
+                </div>
+            </div>
+
+            <span class="prompt">Imported Jobs:</span>
+            <div class="presentation">
+                <div>
+                    <label title="Original UUIDs will be preserved, conflicting UUIDs will be replaced">
+                        <input type="radio" name="createUUIDOption" value="preserve" checked/>
+                        <g:message code="project.archive.import.jobUUIDBehavior.preserve.label"/>
+                    </label>
+                    <span class="info note"><g:message
+                            code="project.archive.import.jobUUIDBehavior.preserve.description"/></span>
                 </div>
 
+                <div>
+                    <label title="New UUIDs will be generated for every imported Job">
+                        <input type="radio" name="createUUIDOption" value="remove"/>
+                        <g:message code="project.archive.import.jobUUIDBehavior.remove.label"/>
+                    </label>
+                    <span class="info note"><g:message
+                            code="project.archive.import.jobUUIDBehavior.remove.description"/></span>
+                </div>
             </div>
             <div class="buttons">
                 <div id="uploadFormButtons">
                     <g:actionSubmit id="createFormCancelButton" value="Cancel"/>
                     <g:actionSubmit action="upload" value="Upload" id="uploadFormUpload" onclick="['uploadFormButtons','schedUploadSpinner'].each(Element.toggle)" />
-                    <g:actionSubmit action="uploadAndExecute" value="Upload And Run" id="uploadFormUploadAndExec" onclick="['uploadFormButtons','schedUploadSpinner'].each(Element.toggle)" />
                 </div>
                 <div id="schedUploadSpinner" class="spinner block" style="display:none;">
                     <img src="${resource(dir:'images',file:'icon-tiny-disclosure-waiting.gif')}" alt="Spinner"/>

@@ -1,20 +1,22 @@
 package rundeck.services
 
+import com.dtolabs.rundeck.core.dispatcher.DataContextUtils
+import com.dtolabs.rundeck.core.plugins.configuration.PropertyResolver
+import com.dtolabs.rundeck.core.plugins.configuration.PropertyScope
+import com.dtolabs.rundeck.plugins.notification.NotificationPlugin
+import com.dtolabs.rundeck.server.plugins.services.NotificationPluginProviderService
 import groovy.xml.MarkupBuilder
-
-import org.apache.commons.httpclient.HttpClient
-import org.apache.commons.httpclient.params.HttpClientParams
-import org.apache.commons.httpclient.methods.PostMethod
 import org.apache.commons.httpclient.Header
-
+import org.apache.commons.httpclient.HttpClient
+import org.apache.commons.httpclient.methods.PostMethod
 import org.apache.commons.httpclient.methods.StringRequestEntity
-import grails.util.GrailsWebUtil
-import org.springframework.web.context.support.WebApplicationContextUtils
-import org.codehaus.groovy.grails.web.context.ServletContextHolder
-import org.springframework.web.context.request.RequestContextHolder
-import rundeck.ScheduledExecution
-import rundeck.Notification
+import org.apache.commons.httpclient.params.HttpClientParams
+import org.springframework.context.ApplicationContext
+import org.springframework.context.ApplicationContextAware
 import rundeck.Execution
+import rundeck.Notification
+import rundeck.ScheduledExecution
+import rundeck.User
 import rundeck.controllers.ExecutionController
 
 /*
@@ -40,10 +42,31 @@ import rundeck.controllers.ExecutionController
  * $Id$
  */
 
-public class NotificationService {
+public class NotificationService implements ApplicationContextAware{
+    boolean transactional = false
 
+    ApplicationContext applicationContext
+    def grailsApplication
     def mailService
+    def pluginService
+    def NotificationPluginProviderService notificationPluginProviderService
+    def FrameworkService frameworkService
 
+    def Map validatePluginConfig(String project, String name, Map config) {
+        return pluginService.validatePlugin(name, notificationPluginProviderService,
+                frameworkService.getFrameworkPropertyResolver(project, config), PropertyScope.Instance, PropertyScope.Project)
+    }
+    /**
+     *
+     * @param name
+     * @return map containing [instance:(plugin instance), description: (map or Description), ]
+     */
+    def Map getNotificationPluginDescriptor(String name) {
+        return pluginService.getPluginDescriptor(name, notificationPluginProviderService)
+    }
+    def Map listNotificationPlugins(){
+        return pluginService.listPlugins(NotificationPlugin,notificationPluginProviderService)
+    }
     def boolean triggerJobNotification(String trigger, schedId, Map content){
         if(trigger && schedId){
             ScheduledExecution.withNewSession {
@@ -65,53 +88,73 @@ public class NotificationService {
                     //sending notification of a status trigger for the Job
                     def Execution exec = content.execution
                     def destarr=n.content.split(",") as List
-                    def subjectmsg="${exec.status == 'true' ? 'SUCCESS' : 'FAILURE'} [${exec.project}] ${source.groupPath?source.groupPath+'/':''}${source.jobName}${exec.argString?' '+exec.argString:''}"
-                    destarr.each{recipient->
+                    final state = ExecutionController.getExecutionState(exec)
+                    def statMsg=[
+                            (ExecutionController.EXECUTION_ABORTED):'KILLED',
+                            (ExecutionController.EXECUTION_FAILED):'FAILURE',
+                            (ExecutionController.EXECUTION_RUNNING):'STARTING',
+                            (ExecutionController.EXECUTION_SUCCEEDED):'SUCCESS',
+                    ]
+                    def status= statMsg[state]?:state
+                    def subjectmsg="${status} [${exec.project}] ${source.groupPath?source.groupPath+'/':''}${source.jobName}${exec.argString?' '+exec.argString:''}"
+
+                    //data context for property refs in email
+                    def userData = ['user.name': exec.user]
+                    //add execution.user.email context data
+                    //search for user profile
+                    def user = User.findByLogin(exec.user)
+                    if(user&& user.email){
+                        userData['user.email']=user.email
+                    }
+
+                    def mailctx=DataContextUtils.addContext("job", userData,null)
+
+                    destarr.each{String recipient->
+                        //try to expand property references
+                        String sendTo=recipient
+                        if(sendTo.indexOf('${')>=0){
+                            try {
+                                sendTo=DataContextUtils.replaceDataReferences(recipient, mailctx,null,true)
+                            } catch (DataContextUtils.UnresolvedDataReferenceException e) {
+                                log.error("Cannot send notification email: "+e.message +
+                                        ", context: user: "+ exec.user+", job: "+source.generateFullName());
+                                return
+                            }
+                        }
                         try{
                             mailService.sendMail{
-                              to recipient
+                              to sendTo
                               subject subjectmsg
-                              body( view:"/execution/mailNotification/status", model: [execution: exec,scheduledExecution:source, msgtitle:subjectmsg,nodestatus:content.nodestatus])
+                              body( view:"/execution/mailNotification/status", model: [execution: exec,
+                                      scheduledExecution:source, msgtitle:subjectmsg,execstate: state,
+                                      nodestatus:content.nodestatus])
                             }
-                        }catch(Exception e){
-                            log.error("Error sending notification email: "+e.getMessage());
+                            didsend = true
+                        }catch(Throwable t){
+                            log.error("Error sending notification email to ${sendTo} for Execution ${exec.id}: "+t.getMessage());
+                            if (log.traceEnabled) {
+                                log.trace("Error sending notification email to ${sendTo} for Execution ${exec.id}: " + t.getMessage(), t)
+                            }
                         }
                     }
-                    didsend= true
                 }else if(n.type=='url'){    //sending notification of a status trigger for the Job
-
-                    def requestAttributes = RequestContextHolder.getRequestAttributes()
-                    boolean unbindrequest = false
-                    // outside of an executing request, establish a mock version
-                    if (!requestAttributes) {
-                        def servletContext = ServletContextHolder.getServletContext()
-                        def applicationContext = WebApplicationContextUtils.getRequiredWebApplicationContext(servletContext)
-                        requestAttributes = GrailsWebUtil.bindMockWebRequest(applicationContext)
-                        unbindrequest = true
-                    }
                     def Execution exec = content.execution
-                    def urlarr = n.content.split(",") as List
                     //iterate through the URLs, and submit a POST to the destination with the XML Execution result
-
-                    def writer = new StringWriter()
-                    def xml = new MarkupBuilder(writer)
                     final state = ExecutionController.getExecutionState(exec)
+                    String xmlStr = RequestHelper.doWithMockRequest {
+                        def writer = new StringWriter()
+                        def xml = new MarkupBuilder(writer)
 
-                    try {
                         xml.'notification'(trigger:trigger,status:state,executionId:exec.id){
                             new ExecutionController().renderApiExecutions([exec], [:], delegate)
                         }
-
-                    } finally {
-                        if (unbindrequest) {
-                            RequestContextHolder.setRequestAttributes(null)
-                        }
+                        writer.flush()
+                        writer.toString()
                     }
-                    writer.flush()
-                    String xmlStr = writer.toString()
                     if (log.traceEnabled){
                         log.trace("Posting webhook notification[${n.eventTrigger},${state},${exec.id}]; to URLs: ${n.content}")
                     }
+                    def urlarr = n.content.split(",") as List
                     def webhookfailure=false
                     urlarr.each{String urlstr->
                         //perform token expansion within URL.
@@ -133,11 +176,45 @@ public class NotificationService {
                         }
                     }
                     didsend=!webhookfailure
+                }else if (n.type) {
+                    def Execution exec = content.execution
+                    //prep execution data
+                    def Map execMap=RequestHelper.doWithMockRequest {
+                        new ExecutionController().exportExecutionData([exec])[0]
+                    }
+                    //TBD: nodestatus will migrate to execution data
+                    if(content['nodestatus']){
+                        execMap['nodestatus'] = content['nodestatus']
+                    }
+                    //data context for property refs in email
+                    def userData = [:]
+                    //add user context data
+                    def user = User.findByLogin(exec.user)
+                    if (user && user.email) {
+                        userData['user.email'] = user.email
+                    }
+                    if (user && user.firstName) {
+                        userData['user.firstName'] = user.firstName
+                    }
+                    if (user && user.lastName) {
+                        userData['user.lastName'] = user.lastName
+                    }
+                    //pass data context
+                    def dcontext= content['context']?.dataContext?:[:]
+                    def mailcontext=DataContextUtils.addContext("job",userData,null)
+                    def context = DataContextUtils.merge(dcontext, mailcontext)
+                    execMap.context=context
+
+                    Map config= n.configuration
+                    if (context && config) {
+                        config = DataContextUtils.replaceDataReferences(config, context)
+                    }
+                    didsend=triggerPlugin(trigger,execMap,n.type, frameworkService.getFrameworkPropertyResolver(source.project, config))
                 }else{
                     log.error("Unsupported notification type: " + n.type);
                 }
                 }catch(Throwable t){
-                    log.error("Error sending notification: ${n}: "+t.message);
+                    log.error("Error sending notification: ${n}: ${t.class}: "+t.message);
                     if (log.traceEnabled) {
                         log.trace("Notification failed",t)
                     }
@@ -147,6 +224,38 @@ public class NotificationService {
 
         return didsend
     }
+
+    /**
+     * Perform a plugin notification
+     * @param trigger trigger name
+     * @param data data content for the plugin
+     * @param content content for notification
+     * @param type plugin type
+     * @param config user configuration
+     */
+    private boolean triggerPlugin(String trigger, Map data,String type, PropertyResolver resolver){
+
+        //load plugin and configure with config values
+        def result = pluginService.configurePlugin(type, notificationPluginProviderService, resolver, PropertyScope.Instance)
+        if (!result?.instance) {
+            return false
+        }
+        def plugin=result.instance
+        /*
+        * contains unmapped configuration values only
+         */
+        def config=result.configuration
+        def allConfig = pluginService.getPluginConfiguration(type, notificationPluginProviderService, resolver, PropertyScope.Instance)
+
+        //invoke plugin
+        //TODO: use executor
+        if (!plugin.postNotification(trigger, data, allConfig)) {
+            log.error("Notification Failed: " + type);
+            return false
+        }
+        true
+    }
+
     String expandWebhookNotificationUrl(String url,Execution exec, ScheduledExecution job, String trigger){
         def state=ExecutionController.getExecutionState(exec)
         /**

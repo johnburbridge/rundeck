@@ -16,10 +16,10 @@ Here are some issues that might arise over time:
 * Routine procedures need to be encapsulated and become the basis for
   other routine procedures.  
 
-Jobs provide a means to encapsulate a procedure in a logically
-named Job. A *Job* is a configuration representing the steps in a
-procedure, a Node filter specification, and dispatcher execution
-control parameters. Jobs access is governed by an access control
+Jobs provide a means to encapsulate a procedure.
+A *Job* is a configuration representing the steps in a
+procedure, a Node filter specification, and execution
+control parameters. Job access is governed by an access control
 policy that describes how users are granted authorization to use Jobs.
 
 Rundeck lets you organize and execute Jobs,  and observe the output as
@@ -204,45 +204,11 @@ From the Jobs, page press the "New Job" button to begin creating a Job.
 
 ![New Job button](../figures/fig0301.png)
 
-### Temporary Jobs
 
-A temporary job is a bit like an ad-hoc command except you get more
-control over how the commands will execute plus the execution can be
-better tracked within the Rundeck webapp.
-
-To create a temporary job, begin by logging in to the Rundeck
-graphical console, and press the "Jobs" tab.
-
-1.  Locate the "New Job" button in the right hand corner and press it to display the "Create New Job" form.
-1.  A job is defined in terms of one or more workflow steps. In the Workflows area, click the "Add a step" link.
-1.  Workflow steps can be one of several types. Click the "Script" workflow step type.
-1.  A script type can be any script that can be executed on the target
-hosts. Type in the "info" shell script we executed earlier using
-dispatch.
-1.  At the bottom of the form, push the "Run and Forget" button to begin execution.
-1.  Execution output can be followed on the subsequent page.
-
-![Temporary job form](../figures/fig0302.png)
-
-### Saved Jobs
-
-Running ad hoc commands and temporary jobs are a typical part of day
-to day administrative work. Occasionally, ad-hoc commands become
-routine procedures and if were reusable, would become more valuable. These jobs
-could be handed off to others in the team or invoked from within other
-Jobs. Rundeck provides an interface to declare and save jobs, both
-graphically or declared with an XML file.
-
-
-### Simple saved job
-
-For the first saved Job example, create a Job that calls the info script.
+For the first Job example, create a Job that calls the info script.
 
 1.   Like in the earlier example, begin by pressing the "New Job" button.
 1.   Within the new job form:
-     -   Select "Yes" for the "Save this job?"
-     prompt. Pressing Yes reveals a form to define a name, group and
-     description for the job. 
      -   For "Job Name", enter "info" and for the "Group", enter
      "adm/resources". 
      -   If you want to specify your own UUID you can enter it in the field. 
@@ -360,11 +326,18 @@ If you want to receive notifications, click Yes under "Send Notification?".
 
 ![Notification form](../figures/fig0322.png)
 
-You can enable notifications for either Success or Failure, and either notification by email, or by webhooks.  Click the checkbox next to the type of notification to enable.
+You can enable notifications for either Success or Failure or Start, and either notification by email, by webhooks or a plugin.  Click the checkbox next to the type of notification to enable.
 
 ![Notifications enabled](../figures/fig0323.png)
 
 Enter either comma-separated email addresses for email notification, or comma-separated URLs for webhook notification.
+
+In the field for "Send Email to" you can also use these variables as property references:
+
+* `${job.user.name}` - the user who executed the job
+* `${job.user.email}` - the email of the executing user if set in their user profile
+
+When the Job starts, all "start" notifications will be triggered.
 
 When the Job finishes executing, all "success" notifications will be triggered if the Job is successful.  Otherwise, all "failure" notifications will be triggered if the Job fails or is cancelled.
 
@@ -507,7 +480,7 @@ See also: [rd-queue](../manpages/man1/rd-queue.html).
 
 ## Deleting Jobs
 
-In the Job detail page, click the red "X" icon for to delete the Job.
+In the Job edit page, click the red "X" icon for to delete the Job.
 
 ![Job delete button](../figures/fig0311.png)
 
@@ -582,11 +555,16 @@ Choose an option where it says "When a job with the same name already
 exists:":
 
 * Update - this means that a job defined in the xml will overwrite any
-  existing job with the same name  
+  existing job with the same name.
 * Skip - this means that a job defined in the xml will be skipped over
   if there is an existing job with the same name  
 * Create - this means that the job defined in the xml will be used to
   create a new job if there is an existing job with the same name.  
+
+Choose an option where it says "Imported Jobs:":
+
+* Preserve UUIDs - this means that UUIDs defined in the imported jobs will be used when importing them.  UUIDs must be unique, so if you have a Job with the same UUID defined in any project, your import may fail.
+* Remove UUIDs - this means that imported Job UUIDs will be ignored, and the imported jobs will either *update* an existing job, or be created with a new UUID.
 
 Click the Upload button. If there are any errors with the Job
 definitions in the XML file, they will show up on the page.  

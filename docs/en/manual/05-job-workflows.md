@@ -3,9 +3,7 @@
 % November 20, 2010
 
 The Job's most basic feature is its ability to execute one or more
-commands across a set of nodes. This sequence of commands is called a
-_workflow_, and each step in the workflow is defined as an invocation
-to a command. 
+steps. This sequence of steps is called a _workflow_.
 
 The steps of the Job workflow are displayed when viewing a Job's
 detail from a Job listing or within the Job editor form.
@@ -41,8 +39,8 @@ and *Strategy*.
 
 *Keepgoing*: This manages what to do if a step incurs and error:
 
-*   No: Fail immediately (default)
-*   Yes: Continue to next step
+*   No: Fail immediately (default).
+*   Yes: Continue to next step.
 
 The default is to fail immediately but depending on the procedure at
 hand you can choose to have the execution continue.
@@ -96,7 +94,7 @@ have a form open asking to enter a shell command as the first step.
 
 To add new steps simply press the "Add a step" link inside the workflow
 editor form. This will prompt you with a dialog asking which kind of
-workflow step you would like to add. Each kind of step has its own
+ step you would like to add. Each kind of step has its own
 form. When you are done filling out the form, press "Save" to add it
 to the sequence. Pressing "Cancel" will close the form and leave the
 sequence unchanged.
@@ -104,16 +102,28 @@ sequence unchanged.
 ![Workflow step types](../figures/fig0403.png)
 
 New steps are always added to the end of the sequence. See
-[Reordering steps](job-workflows.html#reordering-steps) for directions on modifying the
-step order.
+[Reordering steps](job-workflows.html#reordering-steps) 
+for directions on modifying the step order.
 
 The next several sections describe the specification of each kind of
-command step.
+workflow step.
+
+**Types of Steps**
+
+Steps in a workflow can be either *Node Steps* or *Workflow Steps*.
+
+* Node Steps operate once on each Node, which could be multiple times within a workflow
+* Workflow Steps operate only once in the workflow
+
+**Step Plugins**
+
+You can create or install third-party plugins which provide new Steps for your workflows.
+
+* See the chapter on [Plugins](plugins.html).
 
 ### Command step
 
-Use the command step to call system commands. This is the default type
-of workflow step when creating a Job. Enter any command string you
+Use the command step to call system commands. Enter any command string you
 would type at the terminal on the remote hosts.
 
 ![Command step type](../figures/fig0404.png)
@@ -163,12 +173,34 @@ This is similar to calling the script URL with <code>dispatch</code>:
 
 The URL can contain [Context Variables](#context-variables) that will be expanded at runtime.
 
+### Advanced Script options
+
+For [Script steps](#script-step), [Script file steps](#script-file-step), and [Script URL steps](#script-url-step), you can specify an optional *Interpreter* string to declare how the script should be executed.
+
+Click on the "Advanced" link to reveal the input.
+
+![Script interpreter input](../figures/job_workflow_script_interpreter.png)
+
+Enter a command that will be used as the *interpreter* to run the script.  For example, you can execute the script using `sudo` by entering:
+
+    sudo -u username
+
+This will then allow your script to make use of [Sudo authentication](plugins.html#configuring-secondary-sudo-password-authentication).
+
+The effecitve commandline for your script will become:
+
+    sudo -u username [scriptfile] arguments ...
+
+If necessary, you can check the "Quote arguments to interpreter?" checkbox, which will then quote both the scriptfile and arguments before passing to the interpreter command:
+
+    interpreter "[scriptfile] arguments ..."
+
 ### Job reference step
 
 To call another saved Job, create a Job Reference step. Enter the name
 of the Job and its group. 
 
-![Job step type](../figures/fig0407.png)
+![Job reference step type](../figures/fig0407.png)
 
 The Job Reference form provides a Job browser to make it easier to
 select from the existing set of saved Jobs. 
@@ -180,7 +212,9 @@ any input options for the current job.  Format:
 
     -optname <value> -optname <value> ...
 
-The format for specifying options is exactly the same as you would pass to the `run` commandline tool, and you can substitute values of input options to the current job. For example:
+The format for specifying options is exactly the same as you would pass 
+to the `run` commandline tool, and you can substitute values of input 
+options to the current job. For example:
 
     -opt1 something -opt2 ${option.opt2}
 
@@ -195,6 +229,23 @@ If the Job has required Options that are not specified on the arguments line,
 then a "defaultValue" of that option will be used if it is defined.  If a
 required option does not have a default value, then the execution will fail
 because the option is not specified.
+
+Job References can be run as either *Node Steps* or  *Workflow Steps* (see [Workflow Steps : Types of Steps](#workflow-steps)).
+ When you choose to use a Job Reference as a *Node Step*, you can use the Node context variables within the arguments string to the Job.
+
+## Quoting arguments to steps
+
+When you define a [Command](#command-step) or arguments to any Script or Job reference step, your arguments are interpreted as a space-separated sequence of strings. If you need to use spaces or quotes within the argument, here are some rules for quoting arguments:
+
+* If you have an argument with a space character, you can use either double or single quotes: 
+    * `"my argument"`: interpreted as `my argument`
+    * `'my argument'`: interpreted as `my argument`
+* If you need to embed quotes within a quoted argument, you can wrap it in the opposite kind of quote (double or single):
+    * `'"double quotes"'`: interpreted as `"double quotes"`
+    * `"'single quotes'"`: interpreted as `'single quotes'`
+* Or use doubled-up quote characters
+    * `"""double quotes"""`: interpreted as `"double quotes"`
+    * `'''single quotes'''`: interpreted as `'single quotes'`
 
 ## Reordering steps
 
@@ -262,10 +313,14 @@ return success.)
 
 It is a good practice, when you are defining Error Handlers, to **always** have them fail (e.g. scripts/commands return a non-zero exit-code), unless you specifically want them to be used for Recovery.
 
+Note that Error-handlers can be attached to either Node Steps or Workflow Steps, and the type of step and the Strategy of the Workflow determines what type of Error-handler steps can be attached to a step.  The only restriction is in the case that the Workflow is "Node-oriented", which means that the workflow is executed independently for each node.  In this case, Node Steps can only have other Node steps as Error Handlers.  In other cases, the Error Handler can be other Workflow steps.
+
 ### Context information
 
 When the Error-handler step is executed, its execution context will contain some information about the nature
 of the failure that occurred for the original step.
+
+In the case where a Node Step has a Workflow Step as an Error Handler, then the failure data for multiple nodes is rolled up into a single failure reason to be used by the Workflow Step.
 
 See the section on [Context Variables](#context-variables) for more information.
 
@@ -287,6 +342,7 @@ Job context variables:
 * `job.execid`: ID of the current Execution
 * `job.username`: Username of the user executing the Job
 * `job.project`: Project name
+* `job.loglevel`: Logging level, one of: 'ERROR','WARN','INFO','VERBOSE','DEBUG'
 
 Node context variables:
 
@@ -315,8 +371,11 @@ Additional Error-handler context variables:
         * `Unauthorized` - referenced Job not authorized
         * `InvalidOptions` - referenced Job input options invalid
         * `NoMatchedNodes` - referenced Job node dispatch filters had no match
+    * Reason code used from a failed Node Step if the handler is a Workflow Step
+        * `NodeDispatchFailure` - one or more nodes failed the step
 * `result.message`: A string describing the failure
 * `result.resultCode`: Exit code from an execution (if available)
+* `result.failedNodes`: Comma-separated list of node names that failed for a `NodeDispatchFailure`
 
 Option context variables are referred to as `option.NAME` (more about [Job Options](job-options.html) in the next chapter.)
 

@@ -3,6 +3,7 @@ import rundeck.ScheduledExecution
 import rundeck.Workflow
 import rundeck.CommandExec
 import rundeck.Execution
+import rundeck.services.ExecutionService
 import rundeck.services.FrameworkService
 import rundeck.controllers.ExecutionController
 
@@ -609,5 +610,141 @@ class ExecutionControlTests extends GrailsUnitTestCase{
 
         assert 200 == controller.response.status
         assert null == controller.request.apiErrorCode
+    }
+    
+    /**
+     * Test abort authorized
+     */
+    public void testApiExecutionAbortAuthorized() {
+        def controller = new ExecutionController()
+        def execs = createTestExecs()
+        def fwkControl = mockFor(FrameworkService, false)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        def execControl = mockFor(ExecutionService, false)
+        execControl.demand.abortExecution{se, e, user, framework, killas ->
+            assert null==killas
+            [abortstate: 'aborted', jobstate: 'running', statusStr: 'blah', failedreason: null]
+        }
+        fwkControl.demand.authorizeProjectExecutionAll{ framework, e, privs -> return true }
+        
+        controller.frameworkService = fwkControl.createMock()
+        controller.executionService = execControl.createMock()
+        controller.request.api_version = 5
+        controller.params.project = "Test"
+        controller.params.id = execs[2].id.toString()
+
+        controller.apiExecutionAbort(null)
+
+        assert 200 == controller.response.status
+        assert null == controller.request.apiErrorCode
+    }
+    
+    /**
+     * Test abort unauthorized
+     */
+    public void testApiExecutionAbortUnauthorized() {
+        def controller = new ExecutionController()
+        def execs = createTestExecs()
+        def fwkControl = mockFor(FrameworkService, false)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        def execControl = mockFor(ExecutionService, false)
+        execControl.demand.abortExecution{se, e, user, framework, killas ->
+            assert null==killas
+            [abortstate: 'aborted', jobstate: 'running', statusStr: 'blah', failedreason: null]
+        } 
+        fwkControl.demand.authorizeProjectExecutionAll{ framework, e, privs -> return false }
+        
+        controller.frameworkService = fwkControl.createMock()
+        controller.executionService = execControl.createMock()
+        controller.request.api_version = 5
+        controller.params.project = "Test"
+        controller.params.id = execs[2].id.toString()
+
+        controller.apiExecutionAbort(null)
+
+        assert 403 == controller.flash.responseCode
+        assert 'api.error.item.unauthorized' == controller.flash.errorCode
+    }
+    
+    /**
+     * Test abort as user
+     */
+    public void testApiExecutionAbortAsUserUnauthorized() {
+        def controller = new ExecutionController()
+        def execs = createTestExecs()
+        def fwkControl = mockFor(FrameworkService, false)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        def execControl = mockFor(ExecutionService, false)
+        execControl.demand.abortExecution{se, e, user, framework, killas ->
+            assert killas=='testuser'
+            [abortstate: 'aborted', jobstate: 'running', statusStr: 'blah', failedreason: null]
+        }
+        
+        fwkControl.demand.authorizeProjectExecutionAll{ framework, e, privs -> return false }
+
+        controller.frameworkService = fwkControl.createMock()
+        controller.executionService = execControl.createMock()
+        controller.request.api_version = 5
+        controller.params.project = "Test"
+        controller.params.id = execs[2].id.toString()
+        controller.params.asUser = "testuser"
+
+        controller.apiExecutionAbort(null)
+
+        assert 403 == controller.flash.responseCode
+        assert 'api.error.item.unauthorized' == controller.flash.errorCode
+    }
+    
+    /**
+     * Test abort as user
+     */
+    public void testApiExecutionAbortAsUserAuthorized() {
+        def controller = new ExecutionController()
+        def execs = createTestExecs()
+        def fwkControl = mockFor(FrameworkService, false)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        def execControl = mockFor(ExecutionService, false)
+        execControl.demand.abortExecution{se, e, user, framework, killas ->
+            assert killas=='testuser'
+            [abortstate: 'aborted', jobstate: 'running', statusStr: 'blah', failedreason: null]
+        }
+        
+        fwkControl.demand.authorizeProjectExecutionAll{ framework, e, privs -> return true }
+
+        controller.frameworkService = fwkControl.createMock()
+        controller.executionService = execControl.createMock()
+        controller.request.api_version = 5
+        controller.params.project = "Test"
+        controller.params.id = execs[2].id.toString()
+        controller.params.asUser = "testuser"
+
+        controller.apiExecutionAbort(null)
+
+        assert 200 == controller.response.status
+        assert null == controller.request.apiErrorCode
+    }
+    
+    /**
+     * Test get execution output as user
+     */
+    public void testApiExecutionAsUserUnauthorized() {
+        def controller = new ExecutionController()
+        def execs = createTestExecs()
+        def fwkControl = mockFor(FrameworkService, false)
+        def execControl = mockFor(ExecutionService, false)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.authorizeProjectExecutionAll{ framework, e, privs -> return false }
+
+        controller.frameworkService = fwkControl.createMock()
+        controller.executionService = execControl.createMock()
+        controller.request.api_version = 5
+        controller.params.project = "Test"
+        controller.params.id = execs[2].id.toString()
+        controller.params.asUser = "testuser"
+
+        controller.apiExecution(null)
+
+        assert 403 == controller.flash.responseCode
+        assert 'api.error.item.unauthorized' == controller.flash.errorCode
     }
 }

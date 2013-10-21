@@ -1,4 +1,5 @@
 import org.yaml.snakeyaml.Yaml
+import rundeck.Notification
 import rundeck.ScheduledExecution
 import rundeck.Workflow
 import rundeck.CommandExec
@@ -43,7 +44,7 @@ public class JobsYAMLCodecTests extends GroovyTestCase {
             workflow: new Workflow([keepgoing: false, threadcount: 1, commands: [new CommandExec([adhocRemoteString: 'test script']),
                 new CommandExec([adhocLocalString: "#!/bin/bash\n\necho test bash\n\necho tralaala 'something'\n"]),
                 new CommandExec([adhocFilepath: 'some file path']),
-                new JobExec([jobName: 'another job', jobGroup: 'agroup']),
+                new JobExec([jobName: 'another job', jobGroup: 'agroup', nodeStep:true]),
                 new CommandExec([adhocFilepath: 'http://example.com/blah']),
             ]]),
             options: [new Option(name: 'opt1', description: "an opt", defaultValue: "xyz", enforced: true, required: true, values: new TreeSet(["a", "b"]))] as TreeSet,
@@ -87,6 +88,7 @@ public class JobsYAMLCodecTests extends GroovyTestCase {
             assertNotNull "missing command jobref", doc[0].sequence.commands[3].jobref
             assertEquals "missing command jobref.name", "another job", doc[0].sequence.commands[3].jobref.name
             assertEquals "missing command jobref.group", "agroup", doc[0].sequence.commands[3].jobref.group
+            assertEquals "missing command jobref.group", 'true', doc[0].sequence.commands[3].jobref.nodeStep
 
             assertEquals "missing command scriptfile", "http://example.com/blah", doc[0].sequence.commands[4].scripturl
             assertNotNull "missing options", doc[0].options
@@ -115,6 +117,48 @@ public class JobsYAMLCodecTests extends GroovyTestCase {
             assertEquals "not scheduled.time", "3", doc[0].schedule.month
             assertEquals "not scheduled.time", "4", doc[0].schedule.weekday.day
             assertEquals "not scheduled.time", "2011", doc[0].schedule.year
+
+    }
+    void testEncodeNotificationPlugin() {
+        def Yaml yaml = new Yaml()
+        ScheduledExecution se = new ScheduledExecution([
+            jobName: 'test job 1',
+            description: 'test descrip',
+            loglevel: 'INFO',
+            project: 'test1',
+            workflow: new Workflow([keepgoing: false, threadcount: 1, commands: [
+                new CommandExec([adhocFilepath: 'http://example.com/blah'])
+            ]]),
+            options: [new Option(name: 'opt1', description: "an opt", defaultValue: "xyz", enforced: true, required: true, values: new TreeSet(["a", "b"]))] as TreeSet,
+            nodeThreadcount: 1,
+            nodeKeepgoing: true,
+            doNodedispatch: true,
+            nodeInclude: "testhost1",
+            nodeExcludeName: "x1",
+            scheduled: true,
+            seconds: '*',
+            minute: '0',
+            hour: '2',
+            month: '3',
+            dayOfMonth: '?',
+            dayOfWeek: '4',
+            year: '2011',
+                notifications:[
+                    new Notification([eventTrigger:'onsuccess',type:'test1',configuration:["blah":"blee"]])
+                ]
+        ])
+        def jobs1 = [se]
+        def  ymlstr = JobsYAMLCodec.encode(jobs1)
+        assertNotNull ymlstr
+        assertTrue ymlstr instanceof String
+
+        def doc = yaml.load(ymlstr)
+        assertNotNull doc
+        System.out.println("yaml: ${ymlstr}");
+        System.out.println("doc: ${doc}");
+        assertEquals(1,doc[0].notification.size())
+        assertEquals(1,doc[0].notification.onsuccess.size())
+        assertEquals([type:'test1', configuration:['blah':'blee']],doc[0].notification.onsuccess.plugin)
 
     }
     void testEncodeErrorHandlers(){
@@ -311,6 +355,7 @@ public class JobsYAMLCodecTests extends GroovyTestCase {
         name: some job
         group: another group
         args: yankee doodle
+        nodeStep: true
     - scripturl: http://example.com/path/to/file
       args: -blah bloo -blee
   description: test descrip
@@ -408,6 +453,7 @@ public class JobsYAMLCodecTests extends GroovyTestCase {
         assertEquals "wrong workflow item", "some job", se.workflow.commands[3].jobName
         assertEquals "wrong workflow item", "another group", se.workflow.commands[3].jobGroup
         assertEquals "wrong workflow item", "yankee doodle", se.workflow.commands[3].argString
+        assertEquals "wrong workflow item", true, se.workflow.commands[3].nodeStep
             assertTrue "wrong exec type", se.workflow.commands[4] instanceof CommandExec
             assertEquals "wrong workflow item", "http://example.com/path/to/file", se.workflow.commands[4].adhocFilepath
             assertEquals "wrong workflow item", "-blah bloo -blee", se.workflow.commands[4].argString
@@ -442,7 +488,103 @@ public class JobsYAMLCodecTests extends GroovyTestCase {
 
     }
 
-    void testDecodeErrorHandlers(){
+    void testDecodeBasicWithoutProject() {
+            def ymlstr1 = """- id: null
+  loglevel: INFO
+  sequence:
+    keepgoing: false
+    strategy: node-first
+    commands:
+    - exec: test script
+    - script: A Monkey returns
+  description: ''
+  name: test job 1
+  group: my group
+  nodefilters:
+    dispatch:
+      threadcount: 1
+      keepgoing: true
+      excludePrecedence: true
+    include:
+      hostname: testhost1
+    exclude:
+      name: x1
+  schedule:
+    time:
+      seconds: 9
+      hour: 8
+      minute: 5
+    month: 11
+    weekday:
+      day: 0
+    year: 2011
+  options:
+    opt1:
+      enforced: true
+      required: true
+      description: an opt
+      value: xyz
+      values:
+      - a
+      - b
+"""
+            def list = JobsYAMLCodec.decode(ymlstr1)
+            assertNotNull list
+            assertEquals(1, list.size())
+            def obj = list[0]
+            assertTrue(obj instanceof ScheduledExecution)
+            ScheduledExecution se = (ScheduledExecution) list[0]
+            assertEquals "wrong name", "test job 1", se.jobName
+            assertEquals "wrong description", "", se.description
+            assertEquals "wrong groupPath", "my group", se.groupPath
+            assertEquals "wrong project", null, se.project
+            assertEquals "wrong loglevel", "INFO", se.loglevel
+            assertTrue "wrong doNodedispatch", se.doNodedispatch
+            assertEquals "wrong nodeThreadcount", 1, se.nodeThreadcount
+            assertTrue "wrong nodeKeepgoing", se.nodeKeepgoing
+            assertTrue "wrong nodeExcludePrecedence", se.nodeExcludePrecedence
+            assertEquals "wrong nodeInclude", "testhost1", se.nodeInclude
+            assertEquals "wrong nodeExcludeName", "x1", se.nodeExcludeName
+
+            //schedule
+            assertTrue "wrong scheduled", se.scheduled
+            assertEquals "wrong seconds", "9", se.seconds
+            assertEquals "wrong minute", "5", se.minute
+            assertEquals "wrong minute", "8", se.hour
+            assertEquals "wrong minute", "11", se.month
+            assertEquals "wrong minute", "0", se.dayOfWeek
+            assertEquals "wrong minute", "?", se.dayOfMonth
+            assertEquals "wrong minute", "2011", se.year
+
+            //workflow
+            assertNotNull "missing workflow", se.workflow
+            assertNotNull "missing workflow", se.workflow.commands
+            assertFalse "wrong workflow.keepgoing", se.workflow.keepgoing
+            assertEquals "wrong workflow.strategy", "node-first", se.workflow.strategy
+            assertEquals "wrong workflow size", 2, se.workflow.commands.size()
+            assertEquals "wrong workflow item", "test script", se.workflow.commands[0].adhocRemoteString
+            assertTrue "wrong workflow item", se.workflow.commands[0].adhocExecution
+            assertEquals "wrong workflow item", "A Monkey returns", se.workflow.commands[1].adhocLocalString
+            assertTrue "wrong workflow item", se.workflow.commands[1].adhocExecution
+
+            //options
+            assertNotNull "missing options", se.options
+            assertEquals "wrong options size", 1, se.options.size()
+            def opt1 = se.options.iterator().next()
+            assertEquals "wrong option name", "opt1", opt1.name
+            assertEquals "wrong option description", "an opt", opt1.description
+            assertEquals "wrong option defaultValue", "xyz", opt1.defaultValue
+            assertTrue "wrong option name", opt1.enforced
+            assertTrue "wrong option name", opt1.required
+            assertNotNull "wrong option values", opt1.values
+            assertEquals "wrong option values size", 2, opt1.values.size()
+            ArrayList valuesList = new ArrayList(opt1.values)
+            assertEquals "wrong option values[0]", 'a', valuesList[0]
+            assertEquals "wrong option values[1]", 'b', valuesList[1]
+
+        }
+
+        void testDecodeErrorHandlers(){
         def ymlstr1 = """- id: myid
   project: test1
   loglevel: INFO
@@ -548,6 +690,54 @@ public class JobsYAMLCodecTests extends GroovyTestCase {
         assertEquals "err job args", se.workflow.commands[ndx].errorHandler.argString
         assertTrue "err job keepgoing", se.workflow.commands[ndx].errorHandler.keepgoingOnSuccess
 
+
+    }
+
+    void testDecodeNotificationPlugin(){
+        def ymlstr1 = """- id: myid
+  project: test1
+  loglevel: INFO
+  sequence:
+    keepgoing: false
+    strategy: node-first
+    commands:
+    - exec: test script
+      errorhandler:
+        exec: test err
+  description: ''
+  name: test job 1
+  group: my group
+  notification:
+    onsuccess:
+      plugin:
+        type: test1
+        configuration:
+          a: b
+          c: d
+    onfailure:
+      plugin:
+        type: test2
+        configuration:
+          x: yz
+"""
+        def list = JobsYAMLCodec.decode(ymlstr1)
+        assertNotNull list
+        assertEquals(1, list.size())
+        def obj = list[0]
+        assertTrue(obj instanceof ScheduledExecution)
+        ScheduledExecution se = (ScheduledExecution) list[0]
+
+
+        assertNotNull se.notifications
+        assertEquals 2,se.notifications.size()
+        def n1=se.notifications.find{it.type=='test1'}
+        assertNotNull(n1)
+        assertEquals('test1',n1.type)
+        assertEquals([a:'b',c:'d'],n1.configuration)
+        def n2=se.notifications.find{it.type=='test2'}
+        assertNotNull(n2)
+        assertEquals('test2', n2.type)
+        assertEquals([x:'yz'], n2.configuration)
 
     }
 

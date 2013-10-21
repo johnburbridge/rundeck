@@ -4,7 +4,7 @@
   <groupId>org.rundeck</groupId>
   <artifactId>rundeck</artifactId>
   <packaging>war</packaging>
-  <version>1.5-SNAPSHOT</version>
+  <version>1.6.3-SNAPSHOT</version>
   
   <name>RunDeck App</name>
   <description>RunDeck Command and Job Console</description>
@@ -203,19 +203,6 @@
       <scope>compile</scope>
     </dependency>
     
-    <!-- Needed in the case of AOP usage -->
-    <dependency>
-      <groupId>org.aspectj</groupId>
-      <artifactId>aspectjweaver</artifactId>
-      <version>1.6.8</version>
-    </dependency>
-    
-    <dependency>
-      <groupId>org.aspectj</groupId>
-      <artifactId>aspectjrt</artifactId>
-      <version>1.6.8</version>
-    </dependency>
-    
     <dependency>
       <groupId>commons-codec</groupId>
       <artifactId>commons-codec</artifactId>
@@ -252,7 +239,17 @@
           <groupId>xerces</groupId>
           <artifactId>xmlParserAPIs</artifactId>
         </exclusion>
+          <exclusion>
+              <groupId>xalan</groupId>
+              <artifactId>xalan</artifactId>
+          </exclusion>
       </exclusions>
+    </dependency>
+
+    <dependency>
+      <groupId>org.rundeck</groupId>
+      <artifactId>rundeck-jetty-server</artifactId>
+      <version>${project.version}</version>
     </dependency>
 
     <!-- quartz dependency -->

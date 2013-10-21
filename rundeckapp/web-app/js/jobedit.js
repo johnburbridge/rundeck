@@ -173,6 +173,9 @@ function _wfiedit(key,num,isErrorHandler) {
                         elem.observe('keypress', noenter);
                     }
                 });
+                initTooltipForElements('#wfli_' + key + ' .obs_tooltip');
+                $('wfli_' + key).select('textarea.apply_ace').each(_addAceTextarea);
+                $('wfli_' + key).select('textarea.apply_resize').each(_applyTextareaResizer);
             }
         }
     });
@@ -205,6 +208,7 @@ function _wfisave(key,num, formelem,iseh) {
                         _hideWFItemControlsAddEH(num);
                     }
                 }
+                initTooltipForElements('#wfli_' + key + ' .obs_tooltip')
             }
         }
     });
@@ -255,9 +259,60 @@ function _wfiaddnew(type,nodestep) {
                     }
                 });
                 $(newitemElem).down('input[type=text]').focus();
+                initTooltipForElements('#wfli_' + num+ ' .obs_tooltip');
+                $(newitemElem).select('textarea.apply_ace').each(_addAceTextarea);
+                $(newitemElem).select('textarea.apply_resize').each(_applyTextareaResizer);
+
             }
         }
     });
+}
+
+function escapeHtml(unsafe) {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+function _addAceTextarea(textarea){
+    if (_isIe(8)||_isIe(7)||_isIe(6)) {
+        return;
+    }
+    textarea.hide();
+    var _shadow = new Element('div');
+    _shadow.setStyle({
+        width: "100%",
+        height: "560px"
+    });
+    _shadow.addClassName('ace_text');
+    _shadow.innerHTML= escapeHtml($F(textarea));
+    textarea.insert({ after: _shadow });
+    var editor = ace.edit(_shadow.identify());
+    editor.setTheme("ace/theme/chrome");
+    editor.getSession().setMode("ace/mode/sh");
+    editor.getSession().on('change', function (e) {
+        textarea.setValue(editor.getValue());
+    });
+    editor.focus();
+
+    //add controls
+    var _ctrls = new Element('div');
+    _ctrls.addClassName('ace_text_controls');
+
+    var _soft = new Element('input');
+    _soft.setAttribute('type', 'checkbox');
+    _soft.observe('change', function (e) {
+        editor.getSession().setUseWrapMode(_soft.checked);
+    });
+    var _soft_label = new Element('label');
+    _soft_label.appendChild(_soft);
+    _soft_label.appendChild(document.createTextNode('Soft Wrap'));
+
+    _ctrls.appendChild(_soft_label);
+
+    textarea.insert({before:_ctrls});
 }
 function _wfisavenew(formelem) {
     var params = Form.serialize(formelem);
@@ -284,14 +339,24 @@ function _wficancelnew() {
     $('wfnewbutton').show();
     _showWFItemControls();
 }
+function _findParentAttr(e,attr){
+    var value = e.getAttribute(attr);
+    while (e && !value && !e.hasAttribute(attr)) {
+        value = e.parentNode.getAttribute(attr);
+        e = e.parentNode;
+    }
+    return value;
+}
 //events handlers for add/cancel new step
 function _evtNewStepChooseType(evt) {
     var e = evt.element();
-    _wfiaddnew(e.getAttribute('data-step-type'),false);
+    var type = _findParentAttr(e,'data-step-type');
+    _wfiaddnew(type,false);
 }
 function _evtNewNodeStepChooseType(evt) {
     var e = evt.element();
-    _wfiaddnew(e.getAttribute('data-node-step-type'),true);
+    var type = _findParentAttr(e, 'data-node-step-type');
+    _wfiaddnew(type,true);
 }
 function _evtNewStepCancel(evt){
     $('wfnewtypes').hide();
@@ -326,11 +391,13 @@ function _hideWFItemControlsAddEH(num){
 
 function _evtNewEHChooseType(evt){
     var e = evt.element();
-    _wfiaddNewErrorHandler(e, e.getAttribute('data-step-type'), null, false);
+    var type = _findParentAttr(e, 'data-step-type');
+    _wfiaddNewErrorHandler(e, type, null, false);
 }
 function _evtNewEHNodeStepType(evt){
     var e = evt.element();
-    _wfiaddNewErrorHandler(e, e.getAttribute('data-node-step-type'),null, true);
+    var type = _findParentAttr(e, 'data-node-step-type');
+    _wfiaddNewErrorHandler(e, type,null, true);
 }
 function _hideAddNewEHLinks() {
     $$('span.wfitem_add_errorhandler').each(Element.hide);
@@ -367,8 +434,10 @@ function _wfishownewErrorHandler(key,num,nodeStep){
     newehdiv.parentNode.removeChild(newehdiv);
     wfiehli.appendChild(newehdiv);
 
-//    $(newehdiv).select('.node_step_section').each(nodeStep?Element.show:Element.hide);
-    $(newehdiv).select('.step_section').each(!nodeStep ? Element.show : Element.hide);
+    var nodeFirstWfStrat = $('wf_strat_node_first').checked;
+    var allowedWfStepEh=!(nodeStep && nodeFirstWfStrat);
+    //WF step error handler not allowed if strategy is "node-first" and the step is a node step
+    $(newehdiv).select('.step_section').each(allowedWfStepEh ? Element.show : Element.hide);
 
     newehdiv.show();
     $(wfiehli.parentNode).show();
@@ -399,12 +468,14 @@ function _wfiaddNewErrorHandler(elem,type,num,nodestep){
             evalScripts:true,
             onComplete:function (transport) {
                 if (transport.request.success()) {
-                    $(createElement).select('input').each(function (elem) {
+                    $(wfiehli).select('input').each(function (elem) {
                         if (elem.type == 'text') {
                             elem.observe('keypress', noenter);
                         }
                     });
-
+                    initTooltipForElements('#wfli_' + key + ' .obs_tooltip');
+                    $(wfiehli).select('textarea.apply_ace').each(_addAceTextarea);
+                    $(wfiehli).select('textarea.apply_resize').each(_applyTextareaResizer);
                 }
             }
         });
@@ -638,7 +709,7 @@ function _configureInputRestrictions(target) {
     });
     $(target).select('input.restrictOptName').each(function(elem) {
         if (elem.type == 'text') {
-            elem.observe('keypress', onlychars.curry('[a-zA-Z_0-9.\\t]'));
+            elem.observe('keypress', onlychars.curry('[a-zA-Z_0-9.\\t-]'));
         }
     });
 }

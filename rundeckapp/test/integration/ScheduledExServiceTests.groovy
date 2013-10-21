@@ -1,24 +1,8 @@
 import grails.test.GrailsUnitTestCase
-
-import org.quartz.Scheduler
-import org.quartz.SchedulerContext
-import org.quartz.SchedulerMetaData
+import org.quartz.*
 import org.quartz.spi.JobFactory
-import org.quartz.JobDetail
-import org.quartz.Trigger
-import org.quartz.JobDataMap
-import org.quartz.Calendar
-import org.quartz.JobListener
-import org.quartz.TriggerListener
-import org.quartz.SchedulerListener
-
 import org.springframework.context.MessageSource
-import rundeck.ScheduledExecution
-import rundeck.CommandExec
-import rundeck.Workflow
-import rundeck.JobExec
-import rundeck.Option
-import rundeck.Notification
+import rundeck.*
 import rundeck.services.FrameworkService
 import rundeck.services.ScheduledExecutionService
 /*
@@ -71,6 +55,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         se.save()
         long id = se.id
 
+        registerMetaClass(ScheduledExecution)
         ScheduledExecution.metaClass.static.findByUuid = {uuid-> uuid=='testUUID'?se:null }
 
         def result = testService.getByIDorUUID('testUUID')
@@ -126,6 +111,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         se2.save()
         long id2 = se2.id
 
+        registerMetaClass(ScheduledExecution)
         ScheduledExecution.metaClass.static.findByUuid = { uuid-> uuid=='testUUID'? se : uuid==idstr?se2:null }
         assertEquals(se,ScheduledExecution.findByUuid('testUUID'))
 
@@ -213,7 +199,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertEquals 1, execution.workflow.commands.size()
             final CommandExec exec = execution.workflow.commands[0]
@@ -371,6 +356,84 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         }
     }
 
+    public void testDoValidateWorkflowStepFirstErrorhandlers() {
+        def testService = new ScheduledExecutionService()
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        testService.frameworkService = fwkControl.createMock()
+
+        //step first allows any combination of step and error handler types
+        def params = [jobName: 'monkey1', project: 'testProject', description: 'blah',
+                workflow: new Workflow(keepgoing: true,strategy: 'step-first',commands: [
+                        new CommandExec(adhocRemoteString: 'test command1', adhocExecution: true, errorHandler:
+                                new JobExec(jobGroup: 'test1',jobName: 'blah')),
+                        new CommandExec(adhocRemoteString: 'test command2', adhocExecution: true,errorHandler:
+                                new CommandExec(adhocRemoteString: 'test ehcommand', adhocExecution: true)),
+                        new JobExec(jobGroup: 'test1', jobName: 'blah2', errorHandler:
+                                new CommandExec(adhocRemoteString: 'test command1', adhocExecution: true)),
+                        new JobExec(jobGroup: 'test1', jobName: 'blah3', errorHandler:
+                                new JobExec(jobGroup: 'test1', jobName: 'blah4')),
+                ])
+        ]
+        def results = testService._dovalidate(params, 'test', 'test', null)
+        if (results.scheduledExecution.errors.hasErrors()) {
+            results.scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
+            }
+        }
+        assertFalse results.failed
+
+        assertFalse results.scheduledExecution.workflow.commands[0].errors.hasErrors()
+        assertFalse results.scheduledExecution.workflow.commands[1].errors.hasErrors()
+        assertFalse results.scheduledExecution.workflow.commands[2].errors.hasErrors()
+        assertFalse results.scheduledExecution.workflow.commands[3].errors.hasErrors()
+    }
+    public void testDoValidateWorkflowNodeFirstErrorhandlers() {
+        def testService = new ScheduledExecutionService()
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        testService.frameworkService = fwkControl.createMock()
+
+        //Node first rejects non-Node error handler steps for Node steps.
+        def params = [jobName: 'monkey1', project: 'testProject', description: 'blah',
+                workflow: new Workflow(keepgoing: true,strategy: 'node-first',commands: [
+                        new CommandExec(adhocRemoteString: 'test command1', adhocExecution: true, errorHandler:
+                                new JobExec(jobGroup: 'test1',jobName: 'blah')),
+                        new CommandExec(adhocRemoteString: 'test command2', adhocExecution: true,errorHandler:
+                                new CommandExec(adhocRemoteString: 'test ehcommand', adhocExecution: true)),
+                        new JobExec(jobGroup: 'test1', jobName: 'blah2', errorHandler:
+                                new CommandExec(adhocRemoteString: 'test command1', adhocExecution: true)),
+                        new JobExec(jobGroup: 'test1', jobName: 'blah3', errorHandler:
+                                new JobExec(jobGroup: 'test1', jobName: 'blah4')),
+                ])
+        ]
+        def results = testService._dovalidate(params, 'test', 'test', null)
+        results.scheduledExecution.workflow.commands.each{ cmd->
+            if (cmd.errors.hasErrors()) {
+                cmd.errors.allErrors.each {
+                    System.out.println("command: "+cmd+", error: "+it);
+                }
+            }
+        }
+        assertTrue results.failed
+        assertTrue results.scheduledExecution.workflow.commands[0].errors.hasErrors()
+        assertTrue results.scheduledExecution.workflow.commands[0].errors.hasFieldErrors('errorHandler')
+
+        //no error in other commands
+        assertFalse results.scheduledExecution.workflow.commands[1].errors.hasErrors()
+        assertFalse results.scheduledExecution.workflow.commands[2].errors.hasErrors()
+        assertFalse results.scheduledExecution.workflow.commands[3].errors.hasErrors()
+
+    }
+
     public void testDoValidateWorkflowOptions() {
         def testService = new ScheduledExecutionService()
 
@@ -438,6 +501,41 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals("wrong option name", "http://test.com/test3", opt1.realValuesUrl.toExternalForm())
             assertFalse("wrong option name", opt1.enforced)
         }
+    }
+
+    public void testDoValidateScheduledWithNotifications() {
+        def testService = new ScheduledExecutionService()
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.isClusterModeEnabled {->
+            return false
+        }
+        testService.frameworkService = fwkControl.createMock()
+
+        def crontabString = '0 0 2 ? 12 1975'
+        def params = [jobName: 'monkey1', project: 'testProject', description: 'blah',
+                scheduled: true, crontabString: crontabString, useCrontabString: 'true',
+                workflow:new Workflow(commands: [new CommandExec(adhocRemoteString: 'asdf')]),
+                notifications: [[eventTrigger: 'onsuccess', type: 'email', content: 'c@example.com,d@example.com']]
+        ]
+        def results = testService._dovalidate(params, 'test', 'test', null)
+
+        assertTrue(results.failed)
+        assertNotNull(results.scheduledExecution)
+        assertTrue(results.scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = results.scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+
+        assertTrue(execution.errors.hasErrors())
+        assertTrue(execution.errors.hasFieldErrors('crontabString'))
+        assertNotNull execution.workflow
+        assertNotNull execution.workflow.commands
+        assertEquals 1, execution.workflow.commands.size()
     }
 
     public void testDoValidateAdhoc() {
@@ -553,15 +651,12 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
             def CommandExec cexec = execution.workflow.commands[0]
             assertTrue cexec.adhocExecution
             assertEquals 'test what', cexec.adhocRemoteString
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocFilepath
             assertNull execution.argString
         }
         if (true) {//test basic passing input (adhocLocalString)
@@ -598,15 +693,12 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
             def CommandExec cexec = execution.workflow.commands[0]
             assertTrue cexec.adhocExecution
             assertEquals 'test what', cexec.adhocLocalString
-            assertNull execution.adhocRemoteString
-            assertNull execution.adhocFilepath
             assertNull execution.argString
         }
         if (true) {//test basic passing input (adhocFilepath)
@@ -643,15 +735,12 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
             def CommandExec cexec = execution.workflow.commands[0]
             assertTrue cexec.adhocExecution
             assertEquals 'test what', cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
         }
         if (true) {//test argString input for adhocFilepath
@@ -692,15 +781,12 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
             def CommandExec cexec = execution.workflow.commands[0]
             assertTrue cexec.adhocExecution
             assertEquals 'test file', cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertEquals 'test args', execution.argString
         }
         if (true) {//test argString input for adhocRemoteString argString should be set
@@ -718,7 +804,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             }
             testService.frameworkService = fwkControl.createMock()
 
-            def params = [jobName: 'monkey1', project: 'testProject', description: 'blah', type: '', command: '',
+            def params = [jobName: 'monkey1', project: 'testProject', description: 'blah',
                     adhocExecution: true,
                     adhocExecutionType: 'remote',
                     adhocRemoteString: 'test remote',
@@ -742,15 +828,12 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
             def CommandExec cexec = execution.workflow.commands[0]
             assertTrue cexec.adhocExecution
             assertEquals 'test remote', cexec.adhocRemoteString
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocFilepath
             assertEquals 'test args', execution.argString
         }
         if (true) {//test argString input for adhocLocalString
@@ -768,7 +851,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             }
             testService.frameworkService = fwkControl.createMock()
 
-            def params = [jobName: 'monkey1', project: 'testProject', description: 'blah', type: '', command: '',
+            def params = [jobName: 'monkey1', project: 'testProject', description: 'blah',
                     adhocExecution: true,
                     adhocExecutionType: 'local',
                     adhocLocalString: 'test local',
@@ -792,19 +875,15 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
             def CommandExec cexec = execution.workflow.commands[0]
             assertTrue cexec.adhocExecution
             assertEquals 'test local', cexec.adhocLocalString
-            assertNull execution.adhocFilepath
-            assertNull execution.adhocRemoteString
             assertEquals 'test args', execution.argString
         }
     }
-
     public void testDoValidateNotifications() {
 
         def sec = new ScheduledExecutionService()
@@ -822,6 +901,11 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+
+            def ms = mockFor(MessageSource)
+            ms.demand.getMessage { key, data, locale -> key+":"+data.toString()+":"+locale.toString() }
+            ms.demand.getMessage { error, locale -> error.toString()+":"+locale.toString() }
+            sec.messageSource = ms.createMock()
 
             def params = [jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: "test command",
                     notifications: [[eventTrigger: 'onsuccess', type: 'email', content: 'c@example.com,d@example.com']]
@@ -842,7 +926,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -850,8 +933,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNotNull execution.notifications
@@ -897,7 +978,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -905,8 +985,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNotNull execution.notifications
@@ -965,7 +1043,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -973,8 +1050,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNotNull execution.notifications
@@ -1133,6 +1208,58 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue(execution.errors.hasFieldErrors('notifyFailureUrl'))
             assertTrue(execution.errors.hasFieldErrors('notifySuccessUrl'))
         }
+    }
+    public void testInvalidNotificationsEmailsAllowEmbeddedProps(){
+
+        def sec = new ScheduledExecutionService()
+        //test job with notifications, invalid email addresses using map based notifications definition
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.getCommand { project, type, command, framework ->
+            assertEquals 'testProject', project
+            assertEquals 'aType', type
+            assertEquals 'aCommand', command
+            return null
+        }
+        sec.frameworkService = fwkControl.createMock()
+
+        def params = [jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand',
+                notifications: [[eventTrigger: 'onsuccess', type: 'email', content: '${job.user.name}@something.org'],
+                        [eventTrigger: 'onfailure', type: 'email', content: '${job.user.email}']]
+        ]
+        def results = sec._dovalidate(params, 'test', 'test', null)
+        if (results.scheduledExecution.errors.hasErrors()) {
+            results.scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
+            }
+        }
+
+        assertFalse results.failed
+        assertNotNull(results.scheduledExecution)
+        assertTrue(results.scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = results.scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertNotNull execution.notifications
+        assertEquals 2, execution.notifications.size()
+        def notifications = execution.notifications.groupBy {it.eventTrigger}
+        final def not0 = notifications['onsuccess'][0]
+        assertTrue(not0 instanceof Notification)
+        def Notification n0 = not0
+        assertEquals "onsuccess", n0.eventTrigger
+        assertEquals "email", n0.type
+        assertEquals '${job.user.name}@something.org', n0.content
+        final def not1 = notifications['onfailure'][0]
+        assertTrue(not1 instanceof Notification)
+        def Notification n1 = not1
+        assertEquals "onfailure", n1.eventTrigger
+        assertEquals "email", n1.type
+        assertEquals '${job.user.email}', n1.content
     }
 
     public void testDoValidateOptions() {
@@ -1459,10 +1586,86 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         }
     }
 
+    public void testDoValidateClusterModeNotEnabledShouldSetNotServerUUID(){
+        def testService= new ScheduledExecutionService()
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.getCommand { project, type, command, framework ->
+            assertEquals 'testProject', project
+            assertEquals 'aType', type
+            assertEquals 'aCommand', command
+            return null
+        }
+        testService.frameworkService = fwkControl.createMock()
+        testService.frameworkService.metaClass.isClusterModeEnabled = {
+            return false
+        }
+        def params = [jobName: 'monkey1', project: 'testProject', description: 'blah',
+                workflow: [threadcount: 1, keepgoing: true, "commands[0]":
+                        [adhocExecution: true, adhocRemoteString: 'a remote string']
+                ],
+                scheduled: true,
+                crontabString: '0 21 */4 */4 */6 ? 2010-2040'
+        ]
+        def results = testService._dovalidate(params, 'test', 'test', null)
+        assertFalse(results.failed)
+        assertNotNull(results.scheduledExecution)
+        assertTrue(results.scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = results.scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertNull(execution.serverNodeUUID)
+    }
+
+    public void testDoValidateClusterModeIsEnabledShouldSetServerUUID(){
+        def testService= new ScheduledExecutionService()
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.getCommand { project, type, command, framework ->
+            assertEquals 'testProject', project
+            assertEquals 'aType', type
+            assertEquals 'aCommand', command
+            return null
+        }
+        testService.frameworkService = fwkControl.createMock()
+        testService.frameworkService.metaClass.isClusterModeEnabled = {
+            return true
+        }
+        def uuid = UUID.randomUUID().toString()
+        testService.frameworkService.metaClass.getServerUUID = {
+            return uuid
+        }
+        def params = [jobName: 'monkey1', project: 'testProject', description: 'blah',
+                workflow: [threadcount: 1, keepgoing: true, "commands[0]":
+                        [adhocExecution: true, adhocRemoteString: 'a remote string']
+                ],
+                scheduled: true,
+                crontabString: '0 21 */4 */4 */6 ? 2010-2040'
+        ]
+        def results = testService._dovalidate(params, 'test', 'test', null)
+        assertFalse(results.failed)
+        assertNotNull(results.scheduledExecution)
+        assertTrue(results.scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = results.scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertEquals(uuid, execution.serverNodeUUID)
+    }
+
     public void testDoUpdate() {
         def sec = new ScheduledExecutionService()
         if (true) {//test update basic job details
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',)
+            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah')
             se.save()
 
             assertNotNull se.id
@@ -1480,6 +1683,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'aCommand2', command
                 return null
             }
+            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -1508,7 +1712,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
 
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -1516,8 +1719,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNull execution.notifications
@@ -1542,6 +1743,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'aCommand2', command
                 return null
             }
+            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -1585,12 +1787,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals 'aType2', type
-                assertEquals 'aCommand2', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             sec.frameworkService = fwkControl.createMock()
 
             def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
@@ -1615,7 +1812,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
 
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -1623,15 +1819,13 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNull execution.notifications
             assertNull execution.options
         }
         if (true) {//test update basic job details
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',)
+            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', )
             se.save()
 
             assertNotNull se.id
@@ -1643,12 +1837,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals 'aType2', type
-                assertEquals 'aCommand2', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             sec.frameworkService = fwkControl.createMock()
 
             def params = new ScheduledExecution(jobName: 'test/monkey2', project: 'testProject2', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
@@ -1690,16 +1879,11 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals 'aType2', type
-                assertEquals 'aCommand2', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             sec.frameworkService = fwkControl.createMock()
 
             def eh1 = new CommandExec(adhocRemoteString: 'err command')
-            def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+            def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', errorHandler: eh1)])
             )
             def results = sec._doupdateJob(se.id.toString(), params, 'test', 'test', null)
@@ -1721,7 +1905,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
 
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -1731,6 +1914,162 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
 
             def CommandExec ehexec = cexec.errorHandler
             assertEquals 'err command', ehexec.adhocRemoteString
+        }
+    }
+
+    public void testDoUpdateJobErrorHandlersPlugins() {
+        def sec = new ScheduledExecutionService()
+        if (true) {//test update basic job details
+            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+                    workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
+            se.save()
+
+            assertNotNull se.id
+
+            //try to do update of the ScheduledExecution
+            def fwkControl = mockFor(FrameworkService, true)
+            fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+            fwkControl.demand.existsFrameworkProject { project, framework ->
+                assertEquals 'testProject2', project
+                return true
+            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            sec.frameworkService = fwkControl.createMock()
+
+            def eh1 = new PluginStep(keepgoingOnSuccess: true,type: 'asdf',nodeStep: true,configuration: ["blah":"value"])
+            def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+                    workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', errorHandler: eh1)])
+            )
+            def results = sec._doupdateJob(se.id.toString(), params, 'test', 'test', null)
+            def succeeded = results[0]
+            def scheduledExecution = results[1]
+            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+                scheduledExecution.errors.allErrors.each {
+                    System.out.println(it);
+                }
+            }
+            assertTrue succeeded
+            assertNotNull(scheduledExecution)
+            assertTrue(scheduledExecution instanceof ScheduledExecution)
+            final ScheduledExecution execution = scheduledExecution
+            assertNotNull(execution)
+            assertNotNull(execution.errors)
+            assertFalse(execution.errors.hasErrors())
+            assertEquals 'monkey2', execution.jobName
+            assertEquals 'testProject2', execution.project
+            assertEquals 'blah', execution.description
+
+            assertNotNull execution.workflow
+            assertNotNull execution.workflow.commands
+            assertEquals 1, execution.workflow.commands.size()
+            def CommandExec cexec = execution.workflow.commands[0]
+            assertEquals 'test command', cexec.adhocRemoteString
+            assertNotNull cexec.errorHandler
+
+            def PluginStep ehexec = cexec.errorHandler
+            assertTrue( "should be true",!!ehexec.keepgoingOnSuccess)
+            assertEquals 'asdf', ehexec.type
+            assertEquals true, ehexec.nodeStep
+            assertEquals([blah:'value'], ehexec.configuration)
+        }
+    }
+
+    public void testDoUpdateJobErrorHandlersStepFirst() {
+        def sec = new ScheduledExecutionService()
+        if (true) {//test update basic job details
+            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+                    workflow: new Workflow(strategy: 'step-first',
+                            commands: [
+                                    new CommandExec(adhocRemoteString: 'test command', adhocExecution: true),
+                                    new CommandExec(adhocRemoteString: 'test command', adhocExecution: true),
+                                    new JobExec(jobName: 'test1',jobGroup: 'test'),
+                                    new JobExec(jobName: 'test1', jobGroup: 'test'),
+                            ]))
+            se.save()
+
+            assertNotNull se.id
+
+            //try to do update of the ScheduledExecution
+            def fwkControl = mockFor(FrameworkService, true)
+            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+            fwkControl.demand.existsFrameworkProject {project, framework ->
+                assertEquals 'testProject2', project
+                return true
+            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            sec.frameworkService = fwkControl.createMock()
+
+            def eh1 = new CommandExec(adhocRemoteString: 'err command')
+            def eh2 = new CommandExec(adhocRemoteString: 'err command')
+            def eh3 = new JobExec(jobGroup: 'eh',jobName: 'eh1')
+            def eh4 = new JobExec(jobGroup: 'eh',jobName: 'eh2')
+            def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+                workflow: new Workflow(strategy: 'step-first',
+                       commands: [
+                               new CommandExec(adhocRemoteString: 'test command', adhocExecution: true,errorHandler: eh1),
+                               new CommandExec(adhocRemoteString: 'test command', adhocExecution: true,errorHandler:eh3),
+                               new JobExec(jobName: 'test1', jobGroup: 'test',errorHandler: eh2),
+                               new JobExec(jobName: 'test1', jobGroup: 'test',errorHandler: eh4),
+                       ]
+                )
+            )
+            def results = sec._doupdateJob(se.id.toString(), params, 'test', 'test', null)
+            def succeeded = results[0]
+            assertTrue succeeded
+
+        }
+    }
+    public void testDoUpdateJobErrorHandlersNodeFirst() {
+        def sec = new ScheduledExecutionService()
+        if (true) {//test update basic job details
+            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+                    workflow: new Workflow(strategy: 'node-first',
+                            commands: [
+                                    new CommandExec(adhocRemoteString: 'test command', adhocExecution: true),
+                                    new CommandExec(adhocRemoteString: 'test command', adhocExecution: true),
+                                    new JobExec(jobName: 'test1',jobGroup: 'test'),
+                                    new JobExec(jobName: 'test1', jobGroup: 'test'),
+                            ]))
+            se.save()
+
+            assertNotNull se.id
+
+            //try to do update of the ScheduledExecution
+            def fwkControl = mockFor(FrameworkService, true)
+            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+            fwkControl.demand.existsFrameworkProject {project, framework ->
+                assertEquals 'testProject2', project
+                return true
+            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            sec.frameworkService = fwkControl.createMock()
+
+            def eh1 = new CommandExec(adhocRemoteString: 'err command')
+            def eh2 = new CommandExec(adhocRemoteString: 'err command')
+            def eh3 = new JobExec(jobGroup: 'eh',jobName: 'eh1')
+            def eh4 = new JobExec(jobGroup: 'eh',jobName: 'eh2')
+            def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+                workflow: new Workflow(strategy: 'node-first',
+                       commands: [
+                               new CommandExec(adhocRemoteString: 'test command', adhocExecution: true,errorHandler: eh1),
+                               new CommandExec(adhocRemoteString: 'test command', adhocExecution: true,errorHandler:eh3),
+                               new JobExec(jobName: 'test1', jobGroup: 'test',errorHandler: eh2),
+                               new JobExec(jobName: 'test1', jobGroup: 'test',errorHandler: eh4),
+                       ]
+                )
+            )
+            def results = sec._doupdateJob(se.id.toString(), params, 'test', 'test', null)
+            def succeeded = results[0]
+            def ScheduledExecution rese=results[1]
+            assertFalse succeeded
+
+            assertFalse rese.workflow.commands[0].errors.hasErrors()
+
+            assertTrue rese.workflow.commands[1].errors.hasErrors()
+            assertTrue rese.workflow.commands[1].errors.hasFieldErrors('errorHandler')
+            assertFalse rese.workflow.commands[2].errors.hasErrors()
+            assertFalse rese.workflow.commands[3].errors.hasErrors()
+
         }
     }
 
@@ -1752,12 +2091,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals 'aType2', type
-                assertEquals 'aCommand2', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             sec.frameworkService = fwkControl.createMock()
 
             def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah',
@@ -1785,59 +2119,35 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         }
     }
 
-    public void testDoUpdateScheduled() {
-        if (true) {//test set scheduled with crontabString
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
+    public void testDoUpdateJobShouldReplaceNodeThreadcount() {
+        def sec = new ScheduledExecutionService()
+        if (true) {//test update basic job details
+            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+                                            doNodedispatch: true, nodeInclude: "hostname",
+                                            workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)])
+            )
             se.save()
 
             assertNotNull se.id
-            assertFalse se.scheduled
 
             //try to do update of the ScheduledExecution
             def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
+            fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+            fwkControl.demand.existsFrameworkProject { project, framework ->
+                assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getRundeckBase {'test-base'}
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             sec.frameworkService = fwkControl.createMock()
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sesControl.demand.scheduleJob {schedEx, oldname, oldgroup ->
-//                //scheduledExecution, renamed ? oldjobname : null, renamed ? oldjobgroup : null
-//                assertNotNull(schedEx)
-//            }
-//            sec.scheduledExecutionService = sesControl.createMock()
-//            sec.metaClass.scheduleJob= {schedEx, oldname, oldgroup ->
-                //scheduledExecution, renamed ? oldjobname : null, renamed ? oldjobgroup : null
-//                assertNotNull(schedEx)
-//            }
 
-            def qtzControl = mockFor(FakeScheduler, true)
-            qtzControl.demand.getJobNames{name->[]}
-            qtzControl.demand.scheduleJob{jobDetail,trigger-> new Date()}
-            sec.quartzScheduler=qtzControl.createMock()
-//            final subject = new Subject()
-//            subject.principals << new Username('test')
-//            ['userrole', 'test'].each { group ->
-//                subject.principals << new Group(group);
-//            }
-            //sec.request.setAttribute("subject", subject)
-            def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand', scheduled: true, crontabString: '0 21 */4 */4 */6 ? 2010-2040', useCrontabString: 'true']
-            def results = sec._doupdate(params,'test','userrole,test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
+            def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah',
+                                                doNodedispatch: true, nodeIncludeName: "nodename",
+                                                nodeThreadcount: 3,
+                                                workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)])
+            )
+            def results = sec._doupdateJob(se.id.toString(), params, 'test', 'test', null)
+            def succeeded = results[0]
+            def scheduledExecution = results[1]
             if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
                 scheduledExecution.errors.allErrors.each {
                     System.err.println(it);
@@ -1850,464 +2160,383 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertNotNull(execution)
             assertNotNull(execution.errors)
             assertFalse(execution.errors.hasErrors())
-            assertTrue execution.scheduled
-            assertEquals '0', execution.seconds
-            assertEquals '21', execution.minute
-            assertEquals '*/4', execution.hour
-            assertEquals '*/4', execution.dayOfMonth
-            assertEquals '*/6', execution.month
-            assertEquals '?', execution.dayOfWeek
-            assertEquals '2010-2040', execution.year
-            assertTrue execution.userRoles.contains('userrole')
-            assertTrue execution.userRoles.contains('test')
-
+            assertTrue execution.doNodedispatch
+            assertEquals 3, execution.nodeThreadcount
+            assertEquals "nodename", execution.nodeIncludeName
+            assertNull "Filters should have been replaced, but hostname was: ${execution.nodeInclude}", execution.nodeInclude
         }
-        if (true) {//test set scheduled with invalid crontabString (invalid dayOfMonth/dayOfWeek combo)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
+    }
+
+
+    public void testDoUpdateJobShouldNotBeBlankNodeThreadcount() {
+        def sec = new ScheduledExecutionService()
+        if (true) {//test update basic job details
+            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+                                            doNodedispatch: true, nodeInclude: "hostname",
+                    nodeThreadcount: 1,
+                                            workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)])
+            )
             se.save()
 
             assertNotNull se.id
-            assertFalse se.scheduled
+            assertNotNull se.nodeThreadcount
 
             //try to do update of the ScheduledExecution
             def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
+            fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+            fwkControl.demand.existsFrameworkProject { project, framework ->
+                assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             sec.frameworkService = fwkControl.createMock()
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sesControl.demand.scheduleJob {schedEx, oldname, oldgroup ->
-                //scheduledExecution, renamed ? oldjobname : null, renamed ? oldjobgroup : null
-//                assertNotNull(schedEx)
-//            }
-//            sec.scheduledExecutionService = sesControl.createMock()
 
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 21 */4 */4 */6 3 2010-2040', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
+            def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah',
+                                                doNodedispatch: true, nodeIncludeName: "nodename",
+                                                nodeThreadcount: '',
+                                                workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)])
+            )
+            def results = sec._doupdateJob(se.id.toString(), params, 'test', 'test', null)
+            def succeeded = results[0]
+            def scheduledExecution = results[1]
             if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
                 scheduledExecution.errors.allErrors.each {
                     System.err.println(it);
                 }
             }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
+            assertTrue succeeded
+            assertNotNull(scheduledExecution)
+            assertTrue(scheduledExecution instanceof ScheduledExecution)
+            final ScheduledExecution execution = scheduledExecution
+            assertNotNull(execution)
+            assertNotNull(execution.errors)
+            assertFalse(execution.errors.hasErrors())
+            assertTrue execution.doNodedispatch
+            assertEquals 1, execution.nodeThreadcount
+            assertEquals "nodename", execution.nodeIncludeName
+            assertNull "Filters should have been replaced, but hostname was: ${execution.nodeInclude}", execution.nodeInclude
+        }
+    }
+
+
+    public void testDoUpdateScheduledOk() {
+        //test set scheduled with crontabString
+        LinkedHashMap<String, Object> results = assertUpdateCrontabSuccess('0 21 */4 */4 */6 ? 2010-2040')
+        final ScheduledExecution execution = results.scheduledExecution
+        assertEquals '0', execution.seconds
+        assertEquals '21', execution.minute
+        assertEquals '*/4', execution.hour
+        assertEquals '*/4', execution.dayOfMonth
+        assertEquals '*/6', execution.month
+        assertEquals '?', execution.dayOfWeek
+        assertEquals '2010-2040', execution.year
+        assertTrue execution.userRoles.contains('userrole')
+        assertTrue execution.userRoles.contains('test')
+
+    }
+
+    public void testDoUpdateScheduledInvalidDayOfMonth() {
+        //test set scheduled with invalid crontabString (invalid dayOfMonth/dayOfWeek combo)
+        def results = assertUpdateCrontabFailure('0 21 */4 */4 */6 3 2010-2040')
+
+    }
+
+    public void testDoUpdateScheduledInvalidDayOfMonth2() {
+        //test set scheduled with invalid crontabString (invalid dayOfMonth/dayOfWeek combo, two ?)
+        def results = assertUpdateCrontabFailure('0 21 */4 ? */6 ? 2010-2040')
+
+    }
+
+    public void testDoUpdateScheduledInvalidYearChar() {
+        //test set scheduled with invalid crontabString (invalid year char)
+        def results = assertUpdateCrontabFailure('0 21 */4 */4 */6 ? z2010-2040')
+
+    }
+
+    public void testDoUpdateScheduledInvalidTooFewComponents() {
+        //test set scheduled with invalid crontabString  (too few components)
+        def results = assertUpdateCrontabFailure('0 21 */4 */4 */6')
+
+    }
+
+    public void testDoUpdateScheduledInvalidWrongSeconds() {
+    //test set scheduled with invalid crontabString  (wrong seconds value)
+            def results = assertUpdateCrontabFailure('70 21 */4 */4 */6 ?')
 
         }
-        if (true) {//test set scheduled with invalid crontabString (invalid dayOfMonth/dayOfWeek combo, two ?)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
 
-            assertNotNull se.id
-            assertFalse se.scheduled
+    public void testDoUpdateScheduledInvalidWrongMinutes() {
+        //test set scheduled with invalid crontabString  (wrong minutes value)
+        def results = assertUpdateCrontabFailure('0 70 */4 */4 */6 ?')
 
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
-            }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sesControl.demand.scheduleJob {schedEx, oldname, oldgroup ->
-                //scheduledExecution, renamed ? oldjobname : null, renamed ? oldjobgroup : null
-//                assertNotNull(schedEx)
-//            }
-//            sec.scheduledExecutionService = sesControl.createMock()
+    }
 
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 21 */4 ? */6 ? 2010-2040', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
+    public void testDoUpdateScheduledInvalidWrongHour() {
+        //test set scheduled with invalid crontabString  (wrong hour value)
+        def results = assertUpdateCrontabFailure('0 0 25 */4 */6 ?')
+
+    }
+
+    public void testDoUpdateScheduledInvalidWrongDayOfMonth() {
+    //test set scheduled with invalid crontabString  (wrong day of month value)
+            def results = assertUpdateCrontabFailure('0 0 2 32 */6 ?')
 
         }
-        if (true) {//test set scheduled with invalid crontabString (invalid year char)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
 
-            assertNotNull se.id
-            assertFalse se.scheduled
+    public void testDoUpdateScheduledInvalidWrongMonth() {
+        //test set scheduled with invalid crontabString  (wrong month value)
+        def results = assertUpdateCrontabFailure('0 0 2 3 13 ?')
 
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
-            }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
+    }
 
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sec.scheduledExecutionService = sesControl.createMock()
+    public void testDoUpdateScheduledInvalidWrongDayOfWeek() {
+        //test set scheduled with invalid crontabString  (wrong day of week value)
+        def results = assertUpdateCrontabFailure('0 0 2 ? 12 8')
+    }
 
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 21 */4 */4 */6 ? z2010-2040', useCrontabString: 'true']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
+    public void testDoUpdateScheduledInvalidTriggerInPast() {
 
+        //test set scheduled with invalid crontabString  will not fire in future
+        def results = assertUpdateCrontabFailure('0 0 2 ? 12 1975')
+
+    }
+    public void testDoUpdateScheduledInvalidTriggerInPastNotification() {
+
+        //test set scheduled with invalid crontabString  will not fire in future
+        LinkedHashMap<String, Object> results = assertUpdateCrontabFailure('0 0 2 ? 12 1975'){ScheduledExecution se->
+            def na1 = new Notification(eventTrigger: 'onsuccess', type: 'email', content: 'c@example.com,d@example.com')
+            def na2 = new Notification(eventTrigger: 'onfailure', type: 'email', content: 'monkey@example.com')
+            se.addToNotifications(na1)
+            se.addToNotifications(na2)
+            [notifications: [[eventTrigger: 'onsuccess', type: 'email', content: 'spaghetti@nowhere.com'], [eventTrigger: 'onfailure', type: 'email', content: 'milk@store.com']]]
         }
-        if (true) {//test set scheduled with invalid crontabString  (too few components)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
+        ScheduledExecution se = results.scheduledExecution
+        assertNotNull(se.notifications)
+        assertEquals(2,se.notifications.size())
 
-            assertNotNull se.id
-            assertFalse se.scheduled
+    }
+    public void testDoUpdateScheduledInvalidTriggerInPastRemoveNotification() {
 
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
-            }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
-
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sec.scheduledExecutionService = sesControl.createMock()
-
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 21 */4 */4 */6', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
-
+        //test set scheduled with invalid crontabString  will not fire in future
+        LinkedHashMap<String, Object> results = assertUpdateCrontabFailure('0 0 2 ? 12 1975'){ScheduledExecution se->
+            def na1 = new Notification(eventTrigger: 'onsuccess', type: 'email', content: 'c@example.com,d@example.com')
+            def na2 = new Notification(eventTrigger: 'onfailure', type: 'email', content: 'monkey@example.com')
+            se.addToNotifications(na1)
+            se.addToNotifications(na2)
+            [notified:'false']
         }
-        if (true) {//test set scheduled with invalid crontabString  (wrong seconds value)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
+        ScheduledExecution se = results.scheduledExecution
+        assertNotNull(se.notifications)
+        assertEquals(2,se.notifications.size())
+    }
 
-            assertNotNull se.id
-            assertFalse se.scheduled
+    private LinkedHashMap<String, Object> assertUpdateCrontabSuccess(String crontabString) {
+        def sec = new ScheduledExecutionService()
+        def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+                adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
+        se.save()
 
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
-            }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
+        assertNotNull se.id
+        assertFalse se.scheduled
 
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sec.scheduledExecutionService = sesControl.createMock()
-
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '70 21 */4 */4 */6 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
-
+        //try to do update of the ScheduledExecution
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
         }
-        if (true) {//test set scheduled with invalid crontabString  (wrong minutes value)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
-
-            assertNotNull se.id
-            assertFalse se.scheduled
-
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
-            }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
-
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sec.scheduledExecutionService = sesControl.createMock()
-
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 70 */4 */4 */6 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
-
+        fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getRundeckBase { 'test-base' }
+        sec.frameworkService = fwkControl.createMock()
+        sec.frameworkService.metaClass.isClusterModeEnabled = {
+            return false
         }
-        if (true) {//test set scheduled with invalid crontabString  (wrong hour value)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
 
-            assertNotNull se.id
-            assertFalse se.scheduled
-
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
+        def qtzControl = mockFor(FakeScheduler, true)
+        qtzControl.demand.getJobNames { name -> [] }
+        qtzControl.demand.scheduleJob { jobDetail, trigger -> new Date() }
+        sec.quartzScheduler = qtzControl.createMock()
+        def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah',
+                adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand', scheduled: true,
+                crontabString: crontabString, useCrontabString: 'true']
+        def results = sec._doupdate(params, 'test', 'userrole,test', null)
+        def succeeded = results.success
+        def scheduledExecution = results.scheduledExecution
+        if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+            scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
-
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sec.scheduledExecutionService = sesControl.createMock()
-
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 0 25 */4 */6 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
-
         }
-        if (true) {//test set scheduled with invalid crontabString  (wrong day of month value)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
+        assertTrue succeeded
+        assertNotNull(scheduledExecution)
+        assertTrue(scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertTrue execution.scheduled
+        results
+    }
 
-            assertNotNull se.id
-            assertFalse se.scheduled
 
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
-            }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
-
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sec.scheduledExecutionService = sesControl.createMock()
-
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 0 2 32 */6 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
-
+    private LinkedHashMap<String, Object> assertUpdateCrontabFailure(String crontabString,Closure jobConfigure=null) {
+        def sec = new ScheduledExecutionService()
+        def jobMap=[jobName: 'monkey1', project: 'testProject', description: 'blah',]
+        def se = new ScheduledExecution(jobMap)
+        def extraParams=[:]
+        if(jobConfigure){
+            extraParams=jobConfigure.call(se)
         }
-        if (true) {//test set scheduled with invalid crontabString  (wrong month value)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
+        assertNotNull se.save()
 
-            assertNotNull se.id
-            assertFalse se.scheduled
+        assertNotNull se.id
+        assertFalse se.scheduled
 
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
-            }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
-
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sec.scheduledExecutionService = sesControl.createMock()
-
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 0 2 3 13 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
-
+        //try to do update of the ScheduledExecution
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
         }
-        if (true) {//test set scheduled with invalid crontabString  (wrong day of week value)
-            def sec = new ScheduledExecutionService()
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand')
-            se.save()
+        fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        sec.frameworkService = fwkControl.createMock()
 
-            assertNotNull se.id
-            assertFalse se.scheduled
-
-            //try to do update of the ScheduledExecution
-            def fwkControl = mockFor(FrameworkService, true)
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.existsFrameworkProject {project, framework ->
-                assertEquals 'testProject', project
-                return true
-            }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject', project
-                assertEquals 'aType', type
-                assertEquals 'aCommand', command
-                return null
-            }
-            fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
-            sec.frameworkService = fwkControl.createMock()
-
-//            def sesControl = mockFor(ScheduledExecutionService, true)
-//            sesControl.demand.getByIDorUUID {id -> return se }
-//            sec.scheduledExecutionService = sesControl.createMock()
-
-            def params = [id: se.id.toString(), scheduled: true, crontabString: '0 0 2 ? 12 8', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, name: 'aResource', type: 'aType', command: 'aCommand']
-            def results = sec._doupdate(params,'test','test',null)
-            def succeeded = results.success
-            def scheduledExecution = results.scheduledExecution
-            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
-                scheduledExecution.errors.allErrors.each {
-                    System.err.println(it);
-                }
-            }
-            assertFalse succeeded
-            assertTrue scheduledExecution.errors.hasErrors()
-            assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
-
+        sec.frameworkService.metaClass.isClusterModeEnabled = {
+            return false
         }
+
+        def params = [id: se.id.toString(), scheduled: true, crontabString: crontabString, useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: false, ]
+        def results = sec._doupdate(params + (extraParams?:[:]), 'test', 'test', null)
+
+        def succeeded = results.success
+        def scheduledExecution = results.scheduledExecution
+        if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+            scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
+            }
+        }
+        assertFalse succeeded
+        assertTrue scheduledExecution.errors.hasErrors()
+        assertTrue scheduledExecution.errors.hasFieldErrors('crontabString')
+
+        results
+    }
+
+    public void testDoUpdateClusterModeNotEnabledShouldNotSetServerUUID() {
+        def sec = new ScheduledExecutionService()
+        def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+                workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: "blah")])
+        )
+        se.save()
+
+        assertNotNull se.id
+        assertFalse se.scheduled
+
+        //try to do update of the ScheduledExecution
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getRundeckBase { 'test-base' }
+        def uuid = UUID.randomUUID().toString()
+        fwkControl.demand.getServerUUID { uuid }
+        sec.frameworkService = fwkControl.createMock()
+        sec.frameworkService.metaClass.isClusterModeEnabled = {
+            return false
+        }
+
+        def qtzControl = mockFor(FakeScheduler, true)
+        qtzControl.demand.getJobNames { name -> [] }
+        qtzControl.demand.scheduleJob { jobDetail, trigger -> new Date() }
+        sec.quartzScheduler = qtzControl.createMock()
+
+        def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah',
+                scheduled: true, crontabString: '0 21 */4 */4 */6 ? 2010-2040', useCrontabString: 'true']
+        def results = sec._doupdate(params, 'test', 'userrole,test', null)
+        def succeeded = results.success
+        def scheduledExecution = results.scheduledExecution
+        if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+            scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
+            }
+        }
+        assertTrue succeeded
+        assertNotNull(scheduledExecution)
+        assertTrue(scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertTrue execution.scheduled
+        assertNull execution.serverNodeUUID
+        assertTrue execution.serverNodeUUID!=uuid
+    }
+    void testDoUpdateClusterModeIsEnabledShouldSetServerUUID(){
+        def sec = new ScheduledExecutionService()
+        def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+                workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: "blah")]))
+        se.save()
+
+        assertNotNull se.id
+        assertFalse se.scheduled
+
+        //try to do update of the ScheduledExecution
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getRundeckBase { 'test-base' }
+        def uuid = UUID.randomUUID().toString()
+        sec.frameworkService = fwkControl.createMock()
+        sec.frameworkService.metaClass.isClusterModeEnabled = {
+            return true
+        }
+        sec.frameworkService.metaClass.getServerUUID = {
+            return uuid
+        }
+
+        def qtzControl = mockFor(FakeScheduler, true)
+        qtzControl.demand.getJobNames { name -> [] }
+        qtzControl.demand.scheduleJob { jobDetail, trigger -> new Date() }
+        sec.quartzScheduler = qtzControl.createMock()
+
+        def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah',
+                scheduled: true, crontabString: '0 21 */4 */4 */6 ? 2010-2040', useCrontabString: 'true']
+        def results = sec._doupdate(params, 'test', 'userrole,test', null)
+        def succeeded = results.success
+        def scheduledExecution = results.scheduledExecution
+        if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+            scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
+            }
+        }
+        println results
+        assertTrue succeeded
+        assertNotNull(scheduledExecution)
+        assertTrue(scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertTrue execution.scheduled
+        assertNotNull (execution.serverNodeUUID)
+        assertTrue execution.serverNodeUUID==uuid
     }
 
     public void testDoUpdateJobShouldSetCrontabString() {
@@ -2334,6 +2563,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         }
         fwkControl.demand.getRundeckBase{'test-base'}
         sec.frameworkService = fwkControl.createMock()
+        sec.frameworkService.metaClass.isClusterModeEnabled = {
+            return false
+        }
 //        def sesControl = mockFor(ScheduledExecutionService, true)
 //        sesControl.demand.scheduleJob {schedEx, oldname, oldgroup ->
             //scheduledExecution, renamed ? oldjobname : null, renamed ? oldjobgroup : null
@@ -2378,6 +2610,110 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         assertEquals '?', execution.dayOfWeek
         assertEquals '2010-2040', execution.year
     }
+    public void testDoUpdateJobClusterModeNotEnabledShouldNotSetServerUUID() {
+        def sec = new ScheduledExecutionService()
+        //test set scheduled with crontabString
+        def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+
+        )
+        se.save()
+
+        assertNotNull se.id
+        assertFalse se.scheduled
+
+        //try to do update of the ScheduledExecution
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+        fwkControl.demand.existsFrameworkProject {project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.getRundeckBase{'test-base'}
+        sec.frameworkService = fwkControl.createMock()
+        sec.frameworkService.metaClass.isClusterModeEnabled = {
+            return false
+        }
+
+        def qtzControl = mockFor(FakeScheduler, true)
+        qtzControl.demand.getJobNames {name -> []}
+        qtzControl.demand.scheduleJob {jobDetail, trigger -> new Date()}
+        sec.quartzScheduler = qtzControl.createMock()
+        def params = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+                                            workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]),
+                                            scheduled: true, crontabString: '0 21 */4 */4 */6 ? 2010-2040',
+                useCrontabString: 'true')
+        def results = sec._doupdateJob(se.id.toString(), params,'test','test',null)
+        def succeeded = results[0]
+        def scheduledExecution = results[1]
+        if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+            scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
+            }
+        }
+        assertTrue succeeded
+        assertNotNull(scheduledExecution)
+        assertTrue(scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertTrue execution.scheduled
+        assertEquals null,execution.serverNodeUUID
+    }
+    public void testDoUpdateJobClusterModeIsEnabledShouldSetServerUUID() {
+        def sec = new ScheduledExecutionService()
+        //test set scheduled with crontabString
+        def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+
+        )
+        se.save()
+
+        assertNotNull se.id
+        assertFalse se.scheduled
+
+        //try to do update of the ScheduledExecution
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+        fwkControl.demand.existsFrameworkProject {project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.getRundeckBase{'test-base'}
+        sec.frameworkService = fwkControl.createMock()
+        sec.frameworkService.metaClass.isClusterModeEnabled = {
+            return true
+        }
+        def uuid= UUID.randomUUID().toString()
+        sec.frameworkService.metaClass.getServerUUID = {
+            return uuid
+        }
+
+        def qtzControl = mockFor(FakeScheduler, true)
+        qtzControl.demand.getJobNames {name -> []}
+        qtzControl.demand.scheduleJob {jobDetail, trigger -> new Date()}
+        sec.quartzScheduler = qtzControl.createMock()
+        def params = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
+                                            workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]),
+                                            scheduled: true, crontabString: '0 21 */4 */4 */6 ? 2010-2040',
+                useCrontabString: 'true')
+        def results = sec._doupdateJob(se.id.toString(), params,'test','test',null)
+        def succeeded = results[0]
+        def scheduledExecution = results[1]
+        if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+            scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
+            }
+        }
+        assertTrue succeeded
+        assertNotNull(scheduledExecution)
+        assertTrue(scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertTrue execution.scheduled
+        assertEquals uuid,execution.serverNodeUUID
+    }
 
     public void testDoUpdateJobShouldNotSetInvalidCrontabString() {
         def sec = new ScheduledExecutionService()
@@ -2402,6 +2738,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 //            def sesControl = mockFor(ScheduledExecutionService, true)
 //            sesControl.demand.scheduleJob {schedEx, oldname, oldgroup ->
                 //scheduledExecution, renamed ? oldjobname : null, renamed ? oldjobgroup : null
@@ -2450,6 +2789,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 //            def sesControl = mockFor(ScheduledExecutionService, true)
 //            sesControl.demand.scheduleJob {schedEx, oldname, oldgroup ->
                 //scheduledExecution, renamed ? oldjobname : null, renamed ? oldjobgroup : null
@@ -2493,6 +2835,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 
             def params = new ScheduledExecution(scheduled: true, crontabString: '0 21 */4 */4 */6 ? z2010-2040', useCrontabString: 'true',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
@@ -2530,6 +2875,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 
             def params = new ScheduledExecution(scheduled: true, crontabString: '0 21 */4 */4 */6', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
@@ -2567,6 +2915,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 
             def params = new ScheduledExecution(scheduled: true, crontabString: '70 21 */4 */4 */6 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
@@ -2604,6 +2955,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 
             def params = new ScheduledExecution(scheduled: true, crontabString: '0 70 */4 */4 */6 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
@@ -2641,6 +2995,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 
             def params = new ScheduledExecution(scheduled: true, crontabString: '0 0 25 */4 */6 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
@@ -2678,6 +3035,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 
             def params = new ScheduledExecution(scheduled: true, crontabString: '0 0 2 32 */6 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
@@ -2715,6 +3075,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 
             def params = new ScheduledExecution(scheduled: true, crontabString: '0 0 2 3 13 ?', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
@@ -2752,6 +3115,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 return null
             }
             sec.frameworkService = fwkControl.createMock()
+            sec.frameworkService.metaClass.isClusterModeEnabled = {
+                return false
+            }
 
             def params = new ScheduledExecution(scheduled: true, crontabString: '0 0 2 ? 12 8', useCrontabString: 'true', jobName: 'monkey1', project: 'testProject', description: 'blah',
                                                 workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: 'test command', adhocExecution: true)]))
@@ -2787,12 +3153,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals '', type
-                assertEquals '', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -2845,12 +3206,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals '', type
-                assertEquals '', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -2879,7 +3235,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey2', execution.jobName
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -2895,8 +3250,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         }
         if (true) {//test update from one adhoc type to another; remote -> file
             def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah',
-                                            adhocExecution: true, adhocRemoteString: 'test remote',
-                                            command: '', type: '',)
+                                            adhocExecution: true,)
             se.save()
 
             assertNotNull se.id
@@ -2908,12 +3262,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals '', type
-                assertEquals '', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -2942,7 +3291,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey2', execution.jobName
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -2972,12 +3320,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals '', type
-                assertEquals '', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -3006,7 +3349,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey2', execution.jobName
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3035,12 +3377,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals '', type
-                assertEquals '', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -3069,7 +3406,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey2', execution.jobName
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3098,12 +3434,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals '', type
-                assertEquals '', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -3132,7 +3463,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey2', execution.jobName
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3161,12 +3491,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
                 assertEquals 'testProject2', project
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                assertEquals 'testProject2', project
-                assertEquals '', type
-                assertEquals '', command
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -3195,7 +3520,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey2', execution.jobName
             assertEquals 'testProject2', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3228,12 +3552,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'testProject2', project
             return true
         }
-        fwkControl.demand.getCommand {project, type, command, framework ->
-            assertEquals 'testProject2', project
-            assertEquals '', type
-            assertEquals '', command
-            return null
-        }
+        fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
         sec.frameworkService = fwkControl.createMock()
 
         def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah',
@@ -3284,6 +3603,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'testProject2', project
             return true
         }
+        fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
         sec.frameworkService = fwkControl.createMock()
 
         def params = new ScheduledExecution(jobName: 'monkey2', project: 'testProject2', description: 'blah',
@@ -3307,7 +3627,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         assertEquals 'monkey2', execution.jobName
         assertEquals 'testProject2', execution.project
         assertEquals 'blah', execution.description
-        assertFalse execution.adhocExecution
         assertNotNull execution.workflow
         assertNotNull execution.workflow.commands
         assertEquals 1, execution.workflow.commands.size()
@@ -3322,9 +3641,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         assertNull execution.options
     }
 
-    public void testDoUpdateNotificationsShouldUpdate() {
+    public void testDoUpdateNotificationsAddOnsuccess() {
         def sec = new ScheduledExecutionService()
-        if (true) {//test update job  notifications, disabling onsuccess
+        //test update job, add onsuccess
             def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah2', adhocExecution: true, adhocRemoteString: 'test command',)
             def na1 = new Notification(eventTrigger: 'onsuccess', type: 'email', content: 'c@example.com,d@example.com')
             def na2 = new Notification(eventTrigger: 'onfailure', type: 'email', content: 'monkey@example.com')
@@ -3358,8 +3677,8 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
 
             def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah2', adhocExecution: true, adhocRemoteString: 'test command',
                     notified: 'true',
+                    notifyOnsuccess: 'true',
                     notifySuccessRecipients: 'spaghetti@nowhere.com',
-                    notifyOnfailure: 'true', notifyFailureRecipients: 'milk@store.com',
             ]
             def results = sec._doupdate(params,'test','test',null)
             def succeeded = results.success
@@ -3379,7 +3698,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah2', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3387,8 +3705,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNotNull execution.notifications
@@ -3397,14 +3713,145 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             execution.notifications.each {not1 ->
                 nmap[not1.eventTrigger] = not1
             }
-            assertNull(nmap.onsuccess)
+        assertNotNull(nmap.onsuccess)
+        assertNull(nmap.onfailure)
+        assertTrue(nmap.onsuccess instanceof Notification)
+        def Notification n2 = nmap.onsuccess
+        assertEquals "onsuccess", n2.eventTrigger
+        assertEquals "email", n2.type
+        assertEquals "spaghetti@nowhere.com", n2.content
+    }
+    public void testDoUpdateNotificationsShouldUpdateOnSuccess() {
+        assertUpdateNotifications([notified: 'true',
+                notifySuccessRecipients: 'spaghetti@nowhere.com',
+                notifyOnsuccess: 'true',
+                notifyFailureRecipients: 'milk@store.com'
+        ]){ScheduledExecution execution->
+
+            assertEquals 1, execution.notifications.size()
+            def nmap = [:]
+            execution.notifications.each { not1 ->
+                nmap[not1.eventTrigger] = not1
+            }
+            assertNotNull(nmap.onsuccess)
+            assertNull(nmap.onfailure)
+            assertNull(nmap.onstart)
+            assertTrue(nmap.onsuccess instanceof Notification)
+            def Notification n2 = nmap.onsuccess
+            assertEquals "onsuccess", n2.eventTrigger
+            assertEquals "email", n2.type
+            assertEquals "spaghetti@nowhere.com", n2.content
+        }
+    }
+
+    public void testDoUpdateNotificationsShouldUpdateOnFailure() {
+        assertUpdateNotifications([notified: 'true',
+                notifyOnfailure: 'true',
+                notifyFailureRecipients: 'milk@store.com'
+        ]){ScheduledExecution execution->
+
+            assertEquals 1, execution.notifications.size()
+            def nmap = [:]
+            execution.notifications.each { not1 ->
+                nmap[not1.eventTrigger] = not1
+            }
             assertNotNull(nmap.onfailure)
+            assertNull(nmap.onsuccess)
+            assertNull(nmap.onstart)
             assertTrue(nmap.onfailure instanceof Notification)
             def Notification n2 = nmap.onfailure
             assertEquals "onfailure", n2.eventTrigger
             assertEquals "email", n2.type
             assertEquals "milk@store.com", n2.content
         }
+    }
+    public void testDoUpdateNotificationsShouldUpdateOnStart() {
+        assertUpdateNotifications([notified: 'true',
+                notifyOnstart: 'true',
+                notifyStartRecipients: 'avbdf@zzdf.com'
+        ]){ScheduledExecution execution->
+
+            assertEquals 1, execution.notifications.size()
+            def nmap = [:]
+            execution.notifications.each { not1 ->
+                nmap[not1.eventTrigger] = not1
+            }
+            assertNotNull(nmap.onstart)
+            assertNull(nmap.onsuccess)
+            assertNull(nmap.onfailure)
+            assertTrue(nmap.onstart instanceof Notification)
+            def Notification n2 = nmap.onstart
+            assertEquals "onstart", n2.eventTrigger
+            assertEquals "email", n2.type
+            assertEquals "avbdf@zzdf.com", n2.content
+        }
+    }
+
+    private void assertUpdateNotifications(LinkedHashMap<String, String> inputParams, Closure tests=null) {
+        def sec = new ScheduledExecutionService()
+        //test update job  notifications, disabling onsuccess
+        def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah2',
+                adhocExecution: true, adhocRemoteString: 'test command',)
+        se.save()
+
+        assertNotNull se.id
+
+        //try to do update of the ScheduledExecution
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework ->
+            assertEquals 'testProject', project
+            return true
+        }
+        fwkControl.demand.getCommand { project, type, command, framework ->
+            assertEquals 'testProject', project
+            assertEquals 'aType', type
+            assertEquals 'aCommand', command
+            return null
+        }
+        fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        sec.frameworkService = fwkControl.createMock()
+
+        def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah2',
+                adhocExecution: true, adhocRemoteString: 'test command',
+        ] + inputParams
+        def results = sec._doupdate(params, 'test', 'test', null)
+        def succeeded = results.success
+        def scheduledExecution = results.scheduledExecution
+        if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+            scheduledExecution.errors.allErrors.each {
+                System.err.println(it);
+            }
+        }
+        assertTrue succeeded
+        assertNotNull(scheduledExecution)
+        assertTrue(scheduledExecution instanceof ScheduledExecution)
+        final ScheduledExecution execution = scheduledExecution
+        assertNotNull(execution)
+        assertNotNull(execution.errors)
+        assertFalse(execution.errors.hasErrors())
+        assertEquals 'monkey1', execution.jobName
+        assertEquals 'testProject', execution.project
+        assertEquals 'blah2', execution.description
+        assertNotNull execution.workflow
+        assertNotNull execution.workflow.commands
+        assertEquals 1, execution.workflow.commands.size()
+        def CommandExec cexec = execution.workflow.commands[0]
+        assertTrue cexec.adhocExecution
+        assertEquals 'test command', cexec.adhocRemoteString
+        assertNull cexec.adhocFilepath
+        assertNull execution.argString
+
+        assertNotNull execution.notifications
+        if(tests){
+            tests.call(execution)
+        }
+    }
+
+    public void testDoUpdateNotificationsReplace() {
+        def sec = new ScheduledExecutionService()
         if (true) {//test update job  notifications, replacing onsuccess, and removing onfailure
             def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah2', adhocExecution: true, adhocRemoteString: 'test command',)
             def na1 = new Notification(eventTrigger: 'onsuccess', type: 'email', content: 'c@example.com,d@example.com')
@@ -3460,7 +3907,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah2', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3468,8 +3914,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNotNull execution.notifications
@@ -3542,7 +3986,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah2', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3550,11 +3993,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
-            assertNull execution.notifications
+            assertTrue(execution.notifications==null || execution.notifications.size()==0)
         }
 
         if (true) {//test update job  notifications, removing all notifications by unchecking
@@ -3612,7 +4053,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah2', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3620,11 +4060,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
-            assertNull execution.notifications
+            assertTrue(execution.notifications == null || execution.notifications.size() == 0)
         }
     }
 
@@ -3662,7 +4100,8 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
 //            sesControl.demand.getByIDorUUID {id -> return se }
 //            sec.scheduledExecutionService = sesControl.createMock()
 
-            def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+            def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah',
+                    adhocExecution: true, adhocRemoteString: 'test command',
                     notifications: [[eventTrigger: 'onsuccess', type: 'email', content: 'spaghetti@nowhere.com'], [eventTrigger: 'onfailure', type: 'email', content: 'milk@store.com']]
             ]
             def results = sec._doupdate(params,'test','test',null)
@@ -3684,7 +4123,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
 
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3692,8 +4130,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNotNull execution.notifications
@@ -3748,7 +4184,9 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
 //            sesControl.demand.getByIDorUUID {id -> return se }
 //            sec.scheduledExecutionService = sesControl.createMock()
 
-            def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+            def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah',
+                    adhocExecution: true, adhocRemoteString: 'test command',
+                    notified: 'true',
                     notifyOnsuccess: 'true', notifySuccessRecipients: 'spaghetti@nowhere.com',
                     notifyOnfailure: 'true', notifyFailureRecipients: 'milk@store.com',
             ]
@@ -3770,7 +4208,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3778,8 +4215,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNotNull execution.notifications
@@ -3833,7 +4268,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
 //            sesControl.demand.getByIDorUUID {id -> return se }
 //            sec.scheduledExecutionService = sesControl.createMock()
 
-            def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah', adhocExecution: true, adhocRemoteString: 'test command',
+            def params = [id: se.id.toString(), jobName: 'monkey1', project: 'testProject', description: 'blah',
                     notifyOnsuccess: 'true', notifySuccessRecipients: 'spaghetti@ nowhere.com',
                     notifyOnfailure: 'true', notifyFailureRecipients: 'milkstore.com',
             ]
@@ -3860,8 +4295,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertEquals 'test command', execution.adhocRemoteString
-            assertTrue execution.adhocExecution
             assertNotNull execution.notifications
             assertEquals 2, execution.notifications.size()
             def nmap = [:]
@@ -3938,7 +4371,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
 
-            assertFalse execution.adhocExecution
             assertNotNull execution.workflow
             assertNotNull execution.workflow.commands
             assertEquals 1, execution.workflow.commands.size()
@@ -3946,8 +4378,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertTrue cexec.adhocExecution
             assertEquals 'test command', cexec.adhocRemoteString
             assertNull cexec.adhocFilepath
-            assertNull execution.adhocLocalString
-            assertNull execution.adhocRemoteString
             assertNull execution.argString
 
             assertNotNull execution.notifications
@@ -4028,8 +4458,6 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals 'monkey1', execution.jobName
             assertEquals 'testProject', execution.project
             assertEquals 'blah', execution.description
-            assertEquals 'test command', execution.adhocRemoteString
-            assertTrue execution.adhocExecution
             assertNotNull execution.notifications
             assertEquals 2, execution.notifications.size()
             def nmap = [:]
@@ -4120,6 +4548,79 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertLength(1, execution.workflow.commands as Object[])
             def CommandExec cexec = execution.workflow.commands[0]
             assertEquals 'test command2', cexec.adhocRemoteString
+        }
+    }
+
+    public void testDoUpdateNodeThreadcountShouldNotBeBlank() {
+        def sec = new ScheduledExecutionService()
+        if (true) {//test update workflow
+
+            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah3',nodeThreadcount: 1)
+            def workflow = new Workflow(threadcount: 1, keepgoing: true)
+            def wfitem = new CommandExec(adhocExecution: true, adhocRemoteString: 'test command',)
+            workflow.addToCommands(wfitem)
+            se.workflow = workflow
+            se.save()
+
+            assertNotNull se.id
+
+            //try to do update of the ScheduledExecution
+            def fwkControl = mockFor(FrameworkService, true)
+            fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+            fwkControl.demand.existsFrameworkProject { project, framework ->
+                return true
+            }
+            fwkControl.demand.getCommand { project, type, command, framework ->
+                return null
+            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+            fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+            sec.frameworkService = fwkControl.createMock()
+
+//            def sesControl = mockFor(ScheduledExecutionService, true)
+//            sesControl.demand.getByIDorUUID {id -> return se }
+//            sec.scheduledExecutionService = sesControl.createMock()
+
+            def params = [id: se.id.toString(), description: 'changed description',
+                    //set nodeThreadcount to blank
+                    nodeThreadcount:'',
+                    workflow: ['commands[0]': [adhocExecution: true, adhocRemoteString: 'test command2',]], '_workflow_data': true]
+            def results = sec._doupdate(params, 'test', 'test', null)
+            def succeeded = results.success
+            def scheduledExecution = results.scheduledExecution
+            if (scheduledExecution && scheduledExecution.errors.hasErrors()) {
+                scheduledExecution.errors.allErrors.each {
+                    System.out.println(it);
+                }
+            }
+            if (scheduledExecution.workflow) {
+                if (scheduledExecution.workflow.errors.hasErrors()) {
+                    scheduledExecution.workflow.errors.allErrors.each {
+                        System.out.println(it);
+                    }
+                }
+                if (scheduledExecution.workflow.commands) {
+                    scheduledExecution.workflow.commands.each { cexec ->
+                        if (cexec.errors.hasErrors()) {
+                            cexec.errors.allErrors.each {
+                                System.out.println(it);
+                            }
+                        }
+                    }
+                }
+            }
+
+            assertTrue succeeded
+            assertNotNull(scheduledExecution)
+            assertTrue(scheduledExecution instanceof ScheduledExecution)
+            final ScheduledExecution execution = scheduledExecution
+            assertNotNull(execution)
+            assertNotNull(execution.errors)
+            assertFalse(execution.errors.hasErrors())
+            assertEquals('changed description', execution.description)
+            assertNotNull(execution.nodeThreadcount)
+            assertEquals(1, execution.nodeThreadcount)
         }
     }
 
@@ -4712,9 +5213,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             fwkControl.demand.existsFrameworkProject {project, framework ->
                 return true
             }
-            fwkControl.demand.getCommand {project, type, command, framework ->
-                return null
-            }
+            fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.authorizeProjectJobAll {framework, resource, actions, project -> return true}
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
             fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
@@ -4934,6 +5433,196 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
             assertEquals "testdelim", next2.delimiter
 
         }
+    }
+
+    /**
+     * Import job with same UUID, and different project, should fail due to uniqueness of uuid
+     */
+    public void testLoadJobsShouldNotUpdateUUIDWrongProjectDupeOptionUpdate() {
+
+        def sec = new ScheduledExecutionService()
+
+        //create mock of FrameworkService
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+        fwkControl.demand.existsFrameworkProject {project, framework -> return true }
+        fwkControl.demand.authorizeProjectJobAll {framework, job, actions, project -> return true}
+        fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession {session, request -> return null }
+        fwkControl.demand.authorizeProjectResourceAll { framework, job, actions, project -> return true }
+        sec.frameworkService = fwkControl.createMock()
+        def ms = mockFor(MessageSource)
+        ms.demand.getMessage { key, data, locale -> key }
+        ms.demand.getMessage { error, locale -> error.toString() }
+        sec.messageSource = ms.createMock()
+
+        //create original job
+        final CommandExec exec = new CommandExec(adhocExecution: true, adhocRemoteString: "echo original test")
+        exec.save()
+        def wf = new Workflow(commands: [exec])
+        wf.save()
+        def se = new ScheduledExecution(jobName: 'testUploadShouldUpdateSameNameDupeOptionUpdate',
+                groupPath: "testgroup", project: 'project1', description: 'new desc',
+                                        workflow: wf,
+                uuid:UUID.randomUUID().toString()
+        )
+        if(!se.validate()){
+            se.errors.allErrors.each{
+                println it.toString()
+            }
+        }
+        assertNotNull(se.save())
+        assertNotNull(se.id)
+
+
+        def upload = new ScheduledExecution(
+                jobName: 'testUploadShouldUpdateSameNameDupeOptionUpdate',
+                groupPath: "testgroup",
+                project: 'project2',
+                description: 'desc',
+                workflow: new Workflow(commands: [new CommandExec(adhocExecution: true, adhocRemoteString: "echo test")]),
+                uuid:se.uuid
+        )
+        def result=sec.loadJobs([upload], 'update', 'test', 'userrole,test', [:], null)
+        assertNotNull result
+        assertNotNull result.jobs
+        assertNotNull result.errjobs
+        assertNotNull result.skipjobs
+        assertEquals "shouldn't have error jobs: ${result.errjobs}", 1, result.errjobs.size()
+        ScheduledExecution errorjob = result.errjobs[0].scheduledExecution
+        assertTrue(errorjob.hasErrors())
+        assertTrue(errorjob.errors.hasFieldErrors('uuid'))
+        assertEquals "shouldn't have skipped jobs: ${result.skipjobs}", 0, result.skipjobs.size()
+        assertEquals 0, result.jobs.size()
+
+        se.delete()
+    }
+    /**
+     * Import job with same UUID, and different project, should fail due to uniqueness of uuid
+     */
+    public void testLoadJobsUUIDOptionNull() {
+
+        def uuid1 = UUID.randomUUID().toString()
+        assertLoadJobs('create', null, uuid1, uuid1, 'project1', 'project2', { Map result ->
+            assertEquals "should have error jobs: ${result.errjobs}", 1, result.errjobs.size()
+            ScheduledExecution errorjob = result.errjobs[0].scheduledExecution
+            assertTrue(errorjob.hasErrors())
+            assertTrue(errorjob.errors.hasFieldErrors('uuid'))
+            assertEquals "shouldn't have skipped jobs: ${result.skipjobs}", 0, result.skipjobs.size()
+            assertEquals 0, result.jobs.size()
+        })
+    }
+    /**
+     * Import job with same UUID, and different project, should fail due to uniqueness of uuid
+     */
+    public void testLoadJobsUUIDOptionPreserve() {
+
+        def uuid1 = UUID.randomUUID().toString()
+        assertLoadJobs('create', 'preserve', uuid1, uuid1, 'project1', 'project2', { Map result ->
+            assertEquals "should have error jobs: ${result.errjobs}", 1, result.errjobs.size()
+            ScheduledExecution errorjob = result.errjobs[0].scheduledExecution
+            assertTrue(errorjob.hasErrors())
+            assertTrue(errorjob.errors.hasFieldErrors('uuid'))
+            assertEquals "shouldn't have skipped jobs: ${result.skipjobs}", 0, result.skipjobs.size()
+            assertEquals 0, result.jobs.size()
+        })
+    }
+    /**
+     * Import job with same UUID, and different project, should fail due to uniqueness of uuid
+     */
+    public void testLoadJobsUUIDOptionRemove() {
+
+        def uuid1 = UUID.randomUUID().toString()
+        assertLoadJobs('create', 'remove', uuid1, uuid1, 'project1', 'project2', { Map result ->
+            assertEquals "shouldn't have error jobs: ${result.errjobs}", 0, result.errjobs.size()
+            assertEquals "shouldn't have skipped jobs: ${result.skipjobs}", 0, result.skipjobs.size()
+            assertEquals 1, result.jobs.size()
+        })
+    }
+    /**
+     * Import job with same UUID, and different project, should fail due to uniqueness of uuid
+     */
+    public void testLoadJobsUpdateUUIDOptionPreserve() {
+
+        def uuid1 = UUID.randomUUID().toString()
+        assertLoadJobs('update', 'preserve', uuid1, uuid1, 'project1', 'project2', { Map result ->
+            assertEquals "should have error jobs: ${result.errjobs}", 1, result.errjobs.size()
+            ScheduledExecution errorjob = result.errjobs[0].scheduledExecution
+            assertTrue(errorjob.hasErrors())
+            assertTrue(errorjob.errors.hasFieldErrors('uuid'))
+            assertEquals "shouldn't have skipped jobs: ${result.skipjobs}", 0, result.skipjobs.size()
+            assertEquals 0, result.jobs.size()
+        })
+    }
+    /**
+     * Import job with same UUID, and different project, should fail due to uniqueness of uuid
+     */
+    public void testLoadJobsUpdateUUIDOptionRemove() {
+
+        def uuid1 = UUID.randomUUID().toString()
+        assertLoadJobs('update', 'remove', uuid1, uuid1, 'project1', 'project2', { Map result ->
+            assertEquals "shouldn't have error jobs: ${result.errjobs}", 0, result.errjobs.size()
+            assertEquals "shouldn't have skipped jobs: ${result.skipjobs}", 0, result.skipjobs.size()
+            assertEquals 1, result.jobs.size()
+        })
+    }
+
+    private void assertLoadJobs(String importOption, String uuidOption, String uuid1, String uuid2, String project1, String project2, Closure test) {
+        def sec = new ScheduledExecutionService()
+
+        //create mock of FrameworkService
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework -> return true }
+        fwkControl.demand.authorizeProjectJobAll { framework, job, actions, project -> return true }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.authorizeProjectResourceAll { framework, job, actions, project -> return true }
+        sec.frameworkService = fwkControl.createMock()
+        def ms = mockFor(MessageSource)
+        ms.demand.getMessage { key, data, locale -> key }
+        ms.demand.getMessage { error, locale -> error.toString() }
+        sec.messageSource = ms.createMock()
+
+        //create original job
+        final CommandExec exec = new CommandExec(adhocExecution: true, adhocRemoteString: "echo original test")
+        exec.save()
+        def wf = new Workflow(commands: [exec])
+        wf.save()
+        def se = new ScheduledExecution(jobName: 'testjob',
+                groupPath: "testgroup", project: project1?: 'project1', description: 'new desc',
+                workflow: wf,
+                uuid: uuid1
+        )
+        if (!se.validate()) {
+            se.errors.allErrors.each {
+                println it.toString()
+            }
+        }
+        assertNotNull(se.save())
+        assertNotNull(se.id)
+
+
+        def upload = new ScheduledExecution(
+                jobName: 'testjob',
+                groupPath: "testgroup",
+                project: project2?: 'project2',
+                description: 'desc',
+                workflow: new Workflow(commands: [new CommandExec(adhocExecution: true, adhocRemoteString: "echo test")]),
+                uuid: uuid2
+        )
+        def result = sec.loadJobs([upload], importOption,uuidOption, 'test', 'userrole,test', [:], null)
+        assertNotNull result
+        assertNotNull result.jobs
+        assertNotNull result.errjobs
+        assertNotNull result.skipjobs
+        if(test){
+            test.call(result)
+        }
+
+        se.delete()
     }
 
     public void testUploadShouldUpdateSameNameDupeOptionUpdate() {
@@ -5398,6 +6087,41 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         assertEquals "echo original test", test.workflow.commands[0].adhocRemoteString
     }
 
+    public void testLoadJobs_JobShouldRequireProject() {
+        def sec = new ScheduledExecutionService()
+
+        //create mock of FrameworkService
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework -> return true }
+        fwkControl.demand.authorizeProjectResourceAll { framework, resource, actions, project -> return true }
+        fwkControl.demand.authorizeProjectJobAll { framework, scheduledExecution, actions, project -> return true }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        sec.frameworkService = fwkControl.createMock()
+
+        //null project
+
+        def upload = new ScheduledExecution(
+                jobName: 'test1',
+                groupPath: "testgroup",
+                project: null,
+                description: 'desc',
+                workflow: new Workflow(commands: [new CommandExec(adhocExecution: true, adhocRemoteString: "echo test")])
+        )
+
+        def result = sec.loadJobs([upload], 'create', 'test', 'test,userrole', [:], null)
+        assertNotNull result
+        assertNotNull result.jobs
+        assertNotNull result.errjobs
+        assertNotNull result.skipjobs
+        assertEquals "shouldn't have skipped jobs: ${result.skipjobs}", 0, result.skipjobs.size()
+        assertEquals "shouldn't have error jobs: ${result.errjobs}", 1, result.errjobs.size()
+        assertEquals "should have success jobs: ${result.jobs}", 0, result.jobs.size()
+        assertEquals "Project was not specified",result.errjobs[0].errmsg
+    }
+
     public void testUploadShouldOverwriteFilters() {
         def sec = new ScheduledExecutionService()
 
@@ -5583,6 +6307,83 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         se.delete()
     }
 
+    public void testUploadShouldChangeThreadcount() {
+        def sec = new ScheduledExecutionService()
+
+        //create mock of FrameworkService
+        def fwkControl = mockFor(FrameworkService, true)
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.existsFrameworkProject { project, framework -> return true }
+        fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        fwkControl.demand.getFrameworkFromUserSession { session, request -> return null }
+        sec.frameworkService = fwkControl.createMock()
+        //mock the scheduledExecutionService
+//        def mock2 = mockFor(ScheduledExecutionService, true)
+//        mock2.demand.nextExecutionTimes {joblist -> return [] }
+//        sec.scheduledExecutionService = mock2.createMock()
+
+        //create original job
+        final CommandExec exec = new CommandExec(adhocExecution: true, adhocRemoteString: "echo original test")
+        exec.save()
+        def wf = new Workflow(commands: [exec])
+        wf.save()
+        def se = new ScheduledExecution(jobName: 'testUploadOverwritesFilters', groupPath: "testgroup", project: 'project1', description: 'original desc',
+                                        doNodedispatch: true, nodeInclude: "monkey.*", nodeExcludeOsFamily: 'windows', nodeIncludeTags: 'something',
+                                        nodeThreadcount: 1,
+                                        workflow: wf
+        )
+        se.save()
+        assertNotNull se.id
+        assertEquals(1,se.nodeThreadcount)
+
+        //test updating filters
+
+
+        def upload = new ScheduledExecution(
+                jobName: 'testUploadOverwritesFilters',
+                groupPath: "testgroup",
+                project: 'project1',
+                description: 'desc',
+                workflow: new Workflow(commands: [new CommandExec(adhocExecution: true, adhocRemoteString: "echo test")]),
+                doNodedispatch: true,
+                nodeThreadcount: 4,
+                nodeKeepgoing: true,
+                nodeExcludePrecedence: true,
+                nodeInclude: 'asuka',
+                nodeIncludeName: 'test',
+                nodeExclude: 'testo',
+                nodeExcludeTags: 'dev'
+        )
+//        sec.request.addFile(new MockMultipartFile('xmlBatch', 'test.xml', 'text/xml', xml as byte[]))
+        //set update
+
+        def result = sec.loadJobs([upload], 'update', 'test', 'test,userrole', [:], null)
+        //[jobs: jobs, errjobs: errjobs, skipjobs: skipjobs, nextExecutions:scheduledExecutionService.nextExecutionTimes(jobs.grep{ it.scheduled }), messages: msgs, didupload: true]
+//        assertNull sec.response.redirectedUrl
+//        assertNull "Result had an error: ${sec.flash.error}", sec.flash.error
+        assertNotNull result
+        assertNotNull result.jobs
+        assertNotNull result.errjobs
+        assertNotNull result.skipjobs
+        assertEquals "shouldn't have skipped jobs: ${result.skipjobs}", 0, result.skipjobs.size()
+        assertEquals "shouldn't have error jobs: ${result.errjobs}", 0, result.errjobs.size()
+        assertEquals "should have success jobs: ${result.jobs}", 1, result.jobs.size()
+        assertEquals se.id, result.jobs[0].id
+
+        //get original job and test values
+        ScheduledExecution test = ScheduledExecution.get(se.id)
+        assertNotNull test
+        assertTrue test.doNodedispatch
+        assertEquals 4, test.nodeThreadcount
+        assertEquals "asuka", test.nodeInclude
+        assertEquals "test", test.nodeIncludeName
+        assertNull "wrong value", test.nodeIncludeTags
+        assertEquals "testo", test.nodeExclude
+        assertEquals "dev", test.nodeExcludeTags
+        assertNull "wrong value", test.nodeExcludeOsFamily
+    }
 
     public void testUploadErrorHandlers() {
         def sec = new ScheduledExecutionService()
@@ -5705,6 +6506,7 @@ class ScheduledExServiceTests extends GrailsUnitTestCase {
         }
         test.delete()
     }
+
 
 }
 

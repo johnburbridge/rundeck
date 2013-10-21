@@ -1,5 +1,7 @@
 package com.dtolabs.rundeck.util
 
+import org.apache.commons.lang.StringUtils
+
 /*
 * Copyright 2011 DTO Labs, Inc. (http://dtolabs.com)
 *
@@ -48,7 +50,7 @@ public class XmlParserUtil {
     /**
      * Generate data object from the node, not including the node name
      */
-    static Object toObject(Node data) {
+    static Object toObject(Node data, boolean analyze=true) {
         if (null == data) {
             return null
         }
@@ -57,11 +59,11 @@ public class XmlParserUtil {
         def attrs = data.attributes()
         def map = [:]
         if (data.text()) {
-            map['<text>'] = XmlParserUtil.analyzeText(text)
+            map['<text>'] = analyze?XmlParserUtil.analyzeText(text):text
         }
         if (attrs) {
             attrs.keySet().each{
-                map.put(it,analyzeText(attrs[it]))
+                map.put(it,analyze?analyzeText(attrs[it]):attrs[it])
             }
         }
         if (null != childs && childs instanceof Collection) {
@@ -69,11 +71,11 @@ public class XmlParserUtil {
                 if (gp instanceof Node) {
                     if (null != map[gp.name()] && !(map[gp.name()] instanceof Collection)) {
                         def v = map[gp.name()]
-                        map[gp.name()] = [v, toObject(gp)]
+                        map[gp.name()] = [v, toObject(gp,analyze)]
                     } else if (map[gp.name()] instanceof Collection) {
-                        map[gp.name()] << toObject(gp)
+                        map[gp.name()] << toObject(gp, analyze)
                     } else {
-                        map[gp.name()] = toObject(gp)
+                        map[gp.name()] = toObject(gp, analyze)
                     }
                 }
             }
@@ -92,5 +94,26 @@ public class XmlParserUtil {
             return Boolean.parseBoolean(text)
         }
         return text
+    }
+
+    static int stringToInt(Object obj, int defValue) {
+        if (null != obj && obj instanceof Integer) {
+            return obj
+        } else if (null != obj && obj instanceof String && !StringUtils.isBlank(obj)) {
+            try {
+                return Integer.parseInt((String) obj)
+            } catch (NumberFormatException e) {
+            }
+        }
+        return defValue
+    }
+
+    static boolean stringToBool(Object obj, boolean defValue) {
+        if (null != obj && obj instanceof Boolean) {
+            return obj
+        } else if (null != obj && obj instanceof String && !StringUtils.isBlank(obj)) {
+            return Boolean.parseBoolean((String) obj)
+        }
+        return defValue
     }
 }

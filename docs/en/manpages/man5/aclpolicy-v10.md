@@ -20,7 +20,7 @@ The resulting file must be a valid yaml file.
 
 For more information about the exact resources and actions you need to
 authorize for the Rundeck application, see the 
-[Rundeck User Manual - Authorization](manual/administration.html#authorization).
+[Administration Guide - Authorization](../../administration/authorization.html#rundeck-resource-authorizations).
 
 ## Authorizing a certain action on a resource
 
@@ -252,7 +252,7 @@ The changes for the newer version affect the old `rules` section in these ways:
 * Action names have changed from "workflow_X" to simply "X", so you will have 
   to modify the actions.
 
-See [Rundeck User Manual - Authorization](manual/administration.html#authorization) for more information.
+See [Administration Guide - Authorization](../../administration/authorization.html#rundeck-resource-authorizations) for more information.
 
 ### `rules` Element
 
@@ -305,9 +305,9 @@ This document grants full permissions to an 'admin' role:
             kind: event
           allow: [read,create] # allow read/create events
       adhoc:
-        - allow: [read,run,kill] # allow running/killing adhoc jobs
+        - allow: [read,run,runAs,kill,killAs] # allow running/killing adhoc jobs
       job: 
-        - allow: [create,read,update,delete,run,kill] # allow create/read/write/delete/run/kill of all jobs
+        - allow: [create,read,update,delete,run,runAs,kill,killAs] # allow create/read/write/delete/run/kill of all jobs
       node:
         - allow: [read,run] # allow read/run for nodes
     by:

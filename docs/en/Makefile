@@ -11,15 +11,20 @@ HRDATE = $(shell date "+%B %e %Y, %H:%M %Z")
 ifndef VERSION
 VERSION=$(shell grep version.number= ../../version.properties | cut -d= -f 2)
 endif
-RVERSION=$(VERSION)
+
 ifndef TAG
 TAG=$(shell grep version.tag= ../../version.properties | cut -d= -f 2)
 endif
+
 ifneq ($(TAG),GA)
+VERSION=$(VERSION)-$(TAG)
 RVERSION=$(VERSION)-$(TAG)
+else
+RVERSION=$(VERSION)
 endif
 
-EDAM=groovy edam.groovy
+
+EDAM=groovy ../scripts/edam.groovy
 
 .PHONY: man html clean oldlinks
 

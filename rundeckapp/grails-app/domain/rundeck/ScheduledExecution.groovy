@@ -71,22 +71,39 @@ class ScheduledExecution extends ExecutionContext {
         seconds(nullable:true)
         year(nullable:true)
         description(nullable:true)
-        adhocExecution(nullable:true)
-        adhocRemoteString(nullable:true, blank:true)
-        adhocLocalString(nullable:true, blank:true)
-        adhocFilepath(nullable:true, blank:true)
         uuid(unique: true, nullable:true, blank:false, matches: /^\S+$/)
         multipleExecutions(nullable: true)
+        serverNodeUUID(size: 36..36, blank: true, nullable: true, validator: { val, obj ->
+            if (null == val) return true;
+            try { return null != UUID.fromString(val) } catch (IllegalArgumentException e) {
+                return false
+            }
+        })
     }
 
     static mapping = {
         user column: "rduser"
+        nodeInclude(type: 'text')
+        nodeExclude(type: 'text')
+        nodeIncludeName(type: 'text')
+        nodeExcludeName(type: 'text')
+        nodeIncludeTags(type: 'text')
+        nodeExcludeTags(type: 'text')
+        nodeIncludeOsName(type: 'text')
+        nodeExcludeOsName(type: 'text')
+        nodeIncludeOsFamily(type: 'text')
+        nodeExcludeOsFamily(type: 'text')
+        nodeIncludeOsArch(type: 'text')
+        nodeExcludeOsArch(type: 'text')
+        nodeIncludeOsVersion(type: 'text')
+        nodeExcludeOsVersion(type: 'text')
+        userRoleList(type: 'text')
+
         argString type: 'text'
-        nodeIncludeName type: 'text'
-        notifySuccessRecipients type: 'text'
-        notifyFailureRecipients type: 'text'
-        notifySuccessUrl type: 'text'
-        notifyFailureUrl type: 'text'
+        description type: 'text'
+        jobName type: 'text'
+        groupPath type: 'text'
+        options lazy: false
     }
 
 
@@ -158,7 +175,21 @@ class ScheduledExecution extends ExecutionContext {
                 if(!map.notification[it.eventTrigger]){
                     map.notification[it.eventTrigger]=[:]
                 }
-                map.notification[it.eventTrigger].putAll(it.toMap())
+                def trigger= map.notification[it.eventTrigger]
+                def map1 = it.toMap()
+                if(map1.type){
+                    //plugin notification with a type
+                    if(!trigger['plugin']){
+                        trigger['plugin']=map1
+                    }else if(trigger['plugin'] instanceof Map){
+                        trigger['plugin']=[trigger.remove('plugin'),map1]
+                    }else if(trigger['plugin'] instanceof Collection){
+                        trigger['plugin'] << map1
+                    }
+                }else{
+                    //built-in notification, urls or recipients subelements
+                    trigger.putAll(map1)
+                }
             }
         }
         return map
@@ -219,7 +250,7 @@ class ScheduledExecution extends ExecutionContext {
             se.multipleExecutions=data.multipleExecutions?true:false
         }
         if(data.nodefilters){
-            se.nodeThreadcount = data.nodefilters.dispatch.threadcount ? data.nodefilters.dispatch.threadcount : 1
+            se.nodeThreadcount = data.nodefilters.dispatch.threadcount ?: 1
             if(data.nodefilters.dispatch.containsKey('keepgoing')){
                 se.nodeKeepgoing = data.nodefilters.dispatch.keepgoing
             }
@@ -252,11 +283,29 @@ class ScheduledExecution extends ExecutionContext {
         }
         if(data.notification){
             def nots=[]
-            ['onsuccess','onfailure'].each{ name->
+            data.notification.keySet().findAll{it.startsWith('on')}.each{ name->
                 if(data.notification[name]){
+                        //support for built-in notification types
                     ['urls','recipients'].each{ subkey->
                         if(data.notification[name][subkey]){
                             nots << Notification.fromMap(name, [(subkey):data.notification[name][subkey]])
+                        }
+                    }
+                    if(data.notification[name]['plugin']){
+                        def pluginElement=data.notification[name]['plugin']
+                        def plugins=[]
+                        if(pluginElement instanceof Map){
+                            plugins=[pluginElement]
+                        }else if(pluginElement instanceof Collection){
+                            plugins= pluginElement
+                        }else{
+
+                        }
+                        plugins.each{ plugin->
+                            def n=Notification.fromMap(name, plugin)
+                            if(n){
+                                nots << n
+                            }
                         }
                     }
                 }

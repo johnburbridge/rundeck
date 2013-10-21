@@ -246,6 +246,9 @@ if(Prototype.Version=="1.6.0.2"  && Prototype.Browser.IE){
    });
 }
 
+function _isIe(version) {
+    return Prototype.Browser.IE && $$('html')[0].hasClassName('ie' + version);
+}
 /**
  * WidgetBox controller
  * Create a new WBoxController({views:{key:value}}). Each view key is an identifier, and each value is the ID of
@@ -885,11 +888,11 @@ var BubbleController = Class.create({
     },
     show: function (evt) {
         if ($(this._target) && $(this._elem)) {
+            $(evt).stop();
             var bubble = this._getTargetBubble();
 
             new MenuController().showRelativeTo(this._target, $(bubble), this._offx, this._offy);
             $(this._target).addClassName('glow');
-            evt.stopPropagation();
 
             var hidefunc = this.hide.bind(this);
             this._popClickHandler = function(evt) {
@@ -927,22 +930,38 @@ function noenter(e) {
  * @param chars string containing chars to disallow
  * @param e event
  */
-function nochars(chars,e) {
-    if(e && e.charCode!=0 && chars.indexOf(String.fromCharCode(e.charCode))>=0){
+function nochars(chars, e) {
+    var kCode = e.keyCode ? e.keyCode : e.charCode;
+    if (e && kCode != 0 && chars.indexOf(String.fromCharCode(kCode)) >= 0) {
         Event.stop(e);
     }
-    return !(e && e.charCode!=0 && chars.indexOf(String.fromCharCode(e.charCode))>=0);
+    return !(e && kCode != 0 && chars.indexOf(String.fromCharCode(kCode)) >= 0);
+}
+function _applyAce(e,height){
+    if (_isIe(8) || _isIe(7) || _isIe(6)) {
+        return;
+    }
+    $(e).setStyle({
+        width: "100%",
+        height: height!=null ? height : "200px"
+    });
+    $(e).addClassName('ace_editor');
+    var editor = ace.edit(e.identify());
+    editor.setTheme("ace/theme/chrome");
+    editor.getSession().setMode("ace/mode/sh");
+    editor.setReadOnly(true);
 }
 /**
  * keypress handler which allows only chars matching the input regular expression
  * @param regex string to match allowed chars
  * @param e event
  */
-function onlychars(regex,e) {
-    if(e && e.charCode!=0 && !String.fromCharCode(e.charCode).match(regex)){
+function onlychars(regex, e) {
+    var kCode = e.keyCode ? e.keyCode : e.charCode;
+    if (e && kCode != 0 && !String.fromCharCode(kCode).match(regex)) {
         Event.stop(e);
     }
-    return !(e && e.charCode!=0 && !String.fromCharCode(e.charCode).match(regex));
+    return !(e && kCode != 0 && !String.fromCharCode(kCode).match(regex));
 }
 function fireWhenReady(elem,func){
     if($(elem)){
@@ -950,4 +969,143 @@ function fireWhenReady(elem,func){
     }else{
         Event.observe(document,'dom:loaded', function(e){func();});
     }
+}
+
+function selectTab(elem){
+    $(elem).up('.tabset').select('.tab').each(function(e){
+        $(e).removeClassName('selected');
+        if($(e).hasAttribute('data-behavior-tab-deselected')){
+            eval($(e).getAttribute('data-behavior-tab-deselected'));
+        }
+    });
+    $(elem).addClassName('selected');
+    if ($(elem).hasAttribute('data-behavior-tab-selected')) {
+        eval($(elem).getAttribute('data-behavior-tab-selected'));
+    }
+}
+/**
+ * Generate a URL
+ * @param url
+ * @param params
+ * @returns {string}
+ * @private
+ */
+function _genUrl(url,params){
+    var urlparams = [];
+    for (var e in params) {
+        urlparams.push(e + "=" + params[e]);
+    }
+    return url + (url.indexOf('?') > 0 ? '&' : '?') + urlparams.join("&");
+}
+/**
+ * Generate a link
+ * @param url
+ * @param params
+ * @param text
+ * @param css
+ * @param behavior
+ * @returns {HTMLElement}
+ * @private
+ */
+function _pageLink(url,params,text,css,behavior){
+    var a=new Element('a');
+    a.href=_genUrl(url,params)
+    a.innerHTML=text;
+    a.addClassName(css);
+
+        Event.observe(a, 'click', function (evt) {
+            if (behavior && !behavior(a,params)){
+                evt.preventDefault();
+            }
+        });
+    return a;
+}
+/**
+ * generate pagination links
+ * @param elem
+ * @param offset
+ * @param total
+ * @param max
+ * @param options
+ */
+function paginate(elem,offset,total,max,options){
+    var e = $(elem);
+    if(!e){
+        return;
+    }
+    if (!total) {
+        return;
+    } else {
+        total = parseInt(total);
+    }
+    if(!offset){
+        offset=0;
+    }else{
+        offset=parseInt(offset);
+    }
+    if(!max){
+        max=20;
+    } else {
+        max = parseInt(max);
+    }
+    var opts={
+        //message text
+        'paginate.next':'Next','paginate.prev':'Previous',
+        //css classes
+        nextClass:'nextLink',prevClass:'prevLink', stepClass:'step', currentStepClass:'currentStep',
+        //url parameter names
+        offsetParam:'offset',maxParam:'max',
+        //variables
+        maxsteps:10,
+        insertion:'bottom',
+        behavior:null
+    };
+    if(options){
+        Object.extend(opts,options);
+    }
+    if(!opts.baseUrl){
+        return;
+    }
+    var pages= Math.floor(total/max);
+    if(pages!=(total/max)){
+        pages+=1;
+    }
+    var curpage = Math.floor(offset/max) + 1;
+    var page=new Element('span');
+
+    //generate paginate links
+    var firststep=1
+
+    if(curpage>firststep){
+        //previous
+        var a= _pageLink(opts.baseUrl, {offset: (offset - max), max: max}, opts['paginate.prev'], opts['prevClass'], opts.prevBehavior);
+        page.appendChild(a);
+    }
+    //generate intermediate pages
+    var step=1;
+    for(var i=0;i<opts.maxsteps && (max * i)<total;i++){
+        var a;
+        if(i+1== curpage){
+            a = new Element('span');
+            a.addClassName(opts.currentStepClass);
+            a.innerHTML=curpage;
+        }else{
+            a = _pageLink(opts.baseUrl, {offset: max * i , max: max}, i+1, opts['stepClass'], opts.stepBehavior);
+        }
+        page.appendChild(a);
+    }
+    if (offset<total-max) {
+        //next
+        var a = _pageLink(opts.baseUrl, {offset: (offset + max), max: max}, opts['paginate.next'], opts['nextClass'], opts.nextBehavior);
+        page.appendChild(a);
+    }
+
+    if(pages>opts.maxsteps){
+
+    }
+
+    var insert= {};
+    insert[opts.insertion]=page;
+    e.innerHTML='';
+    e.insert(insert);
 }

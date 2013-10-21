@@ -9,7 +9,8 @@ import rundeck.User
 import rundeck.AuthToken
 
 import rundeck.services.FrameworkService
-import rundeck.filters.ApiRequestFilters
+
+import javax.servlet.ServletContext
 
 /*
  * Copyright 2010 DTO Labs, Inc. (http://dtolabs.com)
@@ -38,6 +39,8 @@ import rundeck.filters.ApiRequestFilters
 public class AuthorizationFilters {
     def userService
     def FrameworkService frameworkService
+    
+    def dependsOn = [ApiRequestFilters]
 
     def filters = {
         /**
@@ -88,14 +91,14 @@ public class AuthorizationFilters {
                 } else if (request.api_version) {
                     //allow authentication token to be used 
                     def authtoken = params.authtoken? params.authtoken : request.getHeader('X-RunDeck-Auth-Token')
-                    def tokenobj=authtoken?AuthToken.findByToken(authtoken):null
-                    User user = tokenobj?.user
-                    if (tokenobj && user){
-                        session.user = user.login
+                    String user = lookupToken(authtoken, servletContext)
+
+                    if (user){
+                        session.user = user
                         request.authenticatedToken=authtoken
-                        log.debug("loginCheck found user ${user} via token: ${authtoken}");
+                        request.authenticatedUser=user
                         def subject = new Subject();
-                        subject.principals << new Username(user.login)
+                        subject.principals << new Username(user)
 
                         ['api_token_group'].each{role->
                             subject.principals << new Group(role.trim());
@@ -109,6 +112,7 @@ public class AuthorizationFilters {
                             request.invalidAuthToken = "Token:" + (authtoken.size()>5?authtoken.substring(0, 5):'') + "****"
                         }
                         request.authenticatedToken = null
+                        request.authenticatedUser = null
                         request.invalidApiAuthentication = true
                         if(authtoken){
                             log.error("Invalid API token used: ${authtoken}");
@@ -124,8 +128,7 @@ public class AuthorizationFilters {
          */
         postLoginAuthorizationCheck(controller: '*', action: '*') {
             before = {
-               
-                if (request.invalidApiAuthentication ) {
+                if (request.invalidApiAuthentication) {
                     response.setStatus(403)
                     def authid = session.user ?: "(${request.invalidAuthToken ?: 'unauthenticated'})"
                     log.error("${authid} UNAUTHORIZED for ${controllerName}/${actionName}");
@@ -156,5 +159,29 @@ public class AuthorizationFilters {
                 }
             }
         }
+    }
+
+    /**
+     * Look up the given authToken and return the associated username, or null
+     * @param authtoken
+     * @param context
+     * @return
+     */
+    private String lookupToken(String authtoken, ServletContext context) {
+        if (context.getAttribute("TOKENS_FILE_PROPS")) {
+            Properties tokens = (Properties) context.getAttribute("TOKENS_FILE_PROPS")
+            if (tokens[authtoken]) {
+                def user = tokens[authtoken]
+                log.debug("loginCheck found user ${user} via tokens file, token: ${authtoken}");
+                return user
+            }
+        }
+        def tokenobj = authtoken ? AuthToken.findByToken(authtoken) : null
+        if (tokenobj) {
+            User user = tokenobj?.user
+            log.debug("loginCheck found user ${user} via DB, token: ${authtoken}");
+            return user.login
+        }
+        null
     }
 }

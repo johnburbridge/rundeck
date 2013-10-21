@@ -23,7 +23,7 @@
 --%>
 <%@ page import="rundeck.Execution" contentType="text/html" %>
 <html>
-<head><title>Execution <g:message code="status.label.${execution.status=='true'?'succeed':'fail'}"/></title>
+<head><title>Execution <g:message code="status.label.${execstate}"/></title>
     <style type="text/css">
     span.jobname {
         font-weight: bold;
@@ -73,6 +73,11 @@
 
     .jobInfo .jobIcon.jobok {
         background: transparent url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAABDQAAAQ0BROAatAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAACUSURBVDjLY/j//z8DNjznXp8oEB+J3ObysfBIvAYudfg0XwLi/55rjf+HbnH8jssQvJphBuAzBK/muff6/3utM8VrCE7N8+9P+r/7xab/zcdL/vtvsMJpCF7NB1/t/N93pgGvIXg1wwzAZwjIgCPIfkbWjGwAzBDkMAFFMVUMoMwLFAciVaKRKgmJKkmZKpmJ1OwMACFquSGbMQYsAAAAAElFTkSuQmCC") top left no-repeat;
+        padding-left: 18px;
+    }
+
+    .jobInfo .jobIcon.jobrunning {
+        background: transparent url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAABDQAAAQ0BROAatAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAADVSURBVDjLrZNBCsIwEEV7Ce/gtbyBew/gQQLtovQGXdaVK12YdCUI2oo2RW0tUuGbWaRgdSJCF0M2eY/8mYkHwPtWUsqRqSSKokscx2Pungtem4IQAmEYNpzECVuBS8LCaZpClyWUOYMgYCUsfKtr6PaJ473BIc9ZCQufHy3muwLT5QZ5zUuc8Gx7wmSxckpIkNiGUWZ6toWtwEooDvXENpZGPIigi6CU+hnB9/33CP0m9iUW3mfZB8yOkSTXqurGyMHORSJJoTWkOTl4+FUe5DP9+51f1mwg28gP3wsAAAAASUVORK5CYII=") top left no-repeat;
         padding-left: 18px;
     }
 
@@ -206,19 +211,24 @@ div.progressContainer div.progressContent{
     </style>
 </head>
 <body>
+<g:set var="execfailed" value="${execstate in ['failed','aborted']}"/>
 <div class="content">
     <div class="report">
-        <g:render template="/scheduledExecution/showHead" model="[scheduledExecution:scheduledExecution,execution:execution,noimgs:true,absolute:true]"/>
+        <g:render template="/scheduledExecution/showExecutionHead" model="[scheduledExecution:scheduledExecution,execution:execution,noimgs:true,absolute:true]"/>
 
         <div class="presentation">
-            &bull; <span class="result ${execution?.status != 'true' ? 'fail' : ''}"><g:message code="status.label.${execution.status=='true'?'succeed':'fail'}"/></span>
+            &bull; <span class="result ${execfailed ? 'fail' : ''}"><g:message code="status.label.${execstate}"/></span>
             <g:if test="${execution.dateCompleted && execution.dateStarted}">
             <span class="date">
-                in <g:timeDuration end="${execution?.dateCompleted}" start="${execution.dateStarted}"/>
+                after <g:timeDuration end="${execution?.dateCompleted}" start="${execution.dateStarted}"/>
             </span>
+            </g:if>
+            <g:if test="${execstate=='aborted'}">
+                by <em>${execution.abortedby}</em>
             </g:if>
             - <g:link absolute="true" controller="execution" action="show" id="${execution.id}" title="View execution output">View Output &raquo;</g:link>
         </div>
+        <g:if test="${execstate!='running'}">
         <div class="presentation">
             &bull; <g:link class="filelink"
                 title="Download entire output file"
@@ -230,6 +240,7 @@ div.progressContainer div.progressContent{
             </g:link>
              <g:if test="${filesize}">(${filesize} bytes)</g:if>
         </div>
+        </g:if>
 
         <span class="prompt">Execution</span>
         <div class="presentation">
@@ -278,10 +289,8 @@ div.progressContainer div.progressContent{
                     <g:if test="${scheduledExecution}">
                         <td style="vertical-align:top;" class="toolbar small">
                             %{--<g:render template="/scheduledExecution/actionButtons" model="${[scheduledExecution:scheduledExecution,objexists:objexists,jobAuthorized:jobAuthorized,execPage:true]}"/>--}%
-                            <g:set var="successcount" value="${scheduledExecution.id?Execution.countByScheduledExecutionAndStatus(scheduledExecution,'true'):0}"/>
-                            <g:set var="execCount" value="${scheduledExecution.id?Execution.countByScheduledExecution(scheduledExecution):0}"/>
-                            <g:set var="successrate" value="${execCount>0? (successcount/execCount) : 0}"/>
-                            <g:render template="/scheduledExecution/showStats" model="[scheduledExecution:scheduledExecution,lastrun:null, successrate:successrate]"/>
+                            <g:render template="/scheduledExecution/renderJobStats"
+                                      model="${[scheduledExecution: scheduledExecution]}"/>
                         </td>
                     </g:if>
                 </tr>
@@ -298,7 +307,7 @@ div.progressContainer div.progressContent{
                 <g:if test="${nodestatus }">
                         <g:set var="vals" value="${[nodestatus.succeeded,nodestatus.failed,nodestatus.total]}"/>
                         <g:set var="summary" value=""/>
-                        <g:if test="${vals && vals.size()>2 && vals[2]!='0'}">
+                        <g:if test="${vals && vals.size()>2 && vals[2]!='0' && vals[2]!=0}">
                             <g:set var="a" value="${vals[0] instanceof String? Integer.parseInt(vals[0]):vals[0]}"/>
                             <g:set var="fai" value="${vals[1] instanceof String? Integer.parseInt(vals[1]):vals[1]}"/>
                             <g:set var="den" value="${vals[2] instanceof String? Integer.parseInt(vals[2]):vals[2]}"/>
@@ -335,8 +344,8 @@ div.progressContainer div.progressContent{
     </div>
 </div>
 <div class="foot">
-    Run Deck:
-    <g:link absolute="true" controller="framework" action="nodes"><g:message code="gui.menu.Run"/> &raquo;</g:link>
+    <g:message code="main.app.name"/> :
+    <g:link absolute="true" controller="framework" action="nodes"><g:message code="gui.menu.Nodes"/> &raquo;</g:link>
     <g:link absolute="true" controller="menu" action="jobs"><g:message code="gui.menu.Workflows"/> &raquo;</g:link>
     <g:link absolute="true" controller="reports" action="index"><g:message code="gui.menu.Events"/> &raquo;</g:link>
 </div>

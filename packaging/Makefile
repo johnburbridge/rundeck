@@ -48,21 +48,15 @@ rpm:
 	@mkdir -p rpmdist/SOURCES/usr/bin
 	@mkdir -p rpmdist/SOURCES/var/lib/rundeck
 	@mkdir -p rpmdist/SOURCES/var/lib/rundeck/exp/webapp
-	@mkdir -p rpmdist/SOURCES/var/lib/rundeck/{data,work,logs,cli,libext}
+	@mkdir -p rpmdist/SOURCES/var/lib/rundeck/{data,work,logs,cli,libext,bootstrap}
 	@mkdir -p rpmdist/SOURCES/var/log/rundeck
 	@mkdir -p rpmdist/SOURCES/var/lib/rundeck/var/tmp
 	@mkdir -p rpmdist/SOURCES/tmp/rundeck
 	@mkdir -p rpmdist/SOURCES/var/rundeck/projects
-	@mkdir -p rpmdist/SOURCES/usr/share/man/man{1,5}
-	@mkdir -p rpmdist/SOURCES/usr/share/man/en/man{1,5}
 	@cp -R root/* rpmdist/SOURCES
-	@cp ../docs/en/manpages/man1/*.1.gz rpmdist/SOURCES/usr/share/man/man1
-	@cp ../docs/en/manpages/man5/*.5.gz rpmdist/SOURCES/usr/share/man/man5
-	@cp ../docs/en/manpages/man1/*.1.gz rpmdist/SOURCES/usr/share/man/en/man1
-	@cp ../docs/en/manpages/man5/*.5.gz rpmdist/SOURCES/usr/share/man/en/man5
 	@cp -R ../core/build/tools/lib/*.jar rpmdist/SOURCES/var/lib/rundeck/cli
 	@cp ../core/build/libs/rundeck-core-$(JVERS).jar rpmdist/SOURCES/var/lib/rundeck/cli
-	@cp ../rundeck-launcher/rundeck-jetty-server/build/libs/rundeck-jetty-server-$(JVERS).jar rpmdist/SOURCES/var/lib/rundeck/bootstrap
+	@cp ../rundeck-launcher/launcher/build/launcher-contents/lib/*.jar rpmdist/SOURCES/var/lib/rundeck/bootstrap/
 	@cp ../plugins/*-plugin/build/libs/*-plugin-$(JVERS).jar rpmdist/SOURCES/var/lib/rundeck/libext
 	@cp ../core/src/main/resources/com/dtolabs/launcher/setup/templates/admin.aclpolicy.template rpmdist/SOURCES/etc/rundeck/admin.aclpolicy
 	@cp ../core/src/main/resources/com/dtolabs/launcher/setup/templates/apitoken.aclpolicy.template rpmdist/SOURCES/etc/rundeck/apitoken.aclpolicy
@@ -76,23 +70,17 @@ deb:
 	@mkdir -p debdist/
 	@mkdir -p debdist/usr/bin
 	@mkdir -p debdist/var/lib/rundeck/exp/webapp
-	@mkdir -p debdist/var/lib/rundeck/{data,work,logs,cli,libext}
+	@mkdir -p debdist/var/lib/rundeck/{data,work,logs,cli,libext,bootstrap}
 	@mkdir -p debdist/var/log/rundeck
 	@mkdir -p debdist/var/lib/rundeck/var/tmp
 	@mkdir -p debdist/tmp/rundeck
 	@mkdir -p debdist/var/rundeck/projects
-	@mkdir -p debdist/usr/share/man/man{1,5}
-	@mkdir -p debdist/usr/share/man/en/man{1,5}
 	@cp -R debroot/* debdist
 	@# set version
 	@cat debroot/DEBIAN/control | sed -e "s/%VERSION%/$(VERSION)/" > debdist/DEBIAN/control
-	@cp ../docs/en/manpages/man1/*.1.gz debdist/usr/share/man/man1
-	@cp ../docs/en/manpages/man5/*.5.gz debdist/usr/share/man/man5
-	@cp ../docs/en/manpages/man1/*.1.gz debdist/usr/share/man/en/man1
-	@cp ../docs/en/manpages/man5/*.5.gz debdist/usr/share/man/en/man5
 	@cp -R ../core/build/tools/lib/*.jar debdist/var/lib/rundeck/cli
 	@cp ../core/build/libs/rundeck-core-$(JVERS).jar debdist/var/lib/rundeck/cli
-	@cp ../rundeck-launcher/rundeck-jetty-server/build/libs/rundeck-jetty-server-$(JVERS).jar debdist/var/lib/rundeck/bootstrap
+	@cp ../rundeck-launcher/launcher/build/launcher-contents/lib/*.jar debdist/var/lib/rundeck/bootstrap/
 	@cp ../plugins/*-plugin/build/libs/*-plugin-$(JVERS).jar debdist/var/lib/rundeck/libext
 	@cp ../core/src/main/resources/com/dtolabs/launcher/setup/templates/admin.aclpolicy.template debdist/etc/rundeck/admin.aclpolicy
 	@cp ../core/src/main/resources/com/dtolabs/launcher/setup/templates/apitoken.aclpolicy.template debdist/etc/rundeck/apitoken.aclpolicy

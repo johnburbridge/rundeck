@@ -3,8 +3,10 @@ package rundeck.services
 import com.dtolabs.rundeck.app.support.ScheduledExecutionQuery
 import com.dtolabs.rundeck.core.common.Framework
 import com.dtolabs.rundeck.server.authorization.AuthConstants
+import org.apache.commons.validator.EmailValidator
 import org.apache.log4j.Logger
 import org.apache.log4j.MDC
+import org.hibernate.StaleObjectStateException
 import org.quartz.*
 import org.springframework.context.MessageSource
 import org.springframework.web.context.request.RequestContextHolder
@@ -23,9 +25,10 @@ import java.text.SimpleDateFormat
  *  ScheduledExecutionService manages scheduling jobs with the Quartz scheduler
  */
 class ScheduledExecutionService /*implements ApplicationContextAware*/{
-    boolean transactional = false
+    boolean transactional = true
 
     def FrameworkService frameworkService
+    def NotificationService notificationService
 
     def Scheduler quartzScheduler
 
@@ -264,48 +267,82 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         return groupMap
     }
 
-    def rescheduleJobs(){
-        def schedJobs=ScheduledExecution.findAllByScheduled(true)
-        schedJobs.each{ ScheduledExecution se->
+    /**
+     * Claim schedule for a job with the passed in serverUUID
+     * @param scheduledExecution
+     * @param serverUUID uuid to assign to the scheduled job
+     * @return
+     */
+    private boolean claimScheduledJob(ScheduledExecution scheduledExecution, String serverUUID, String fromServerUUID=null){
+        def schedId=scheduledExecution.id
+        def claimed=false
+        if (!scheduledExecution.scheduled || scheduledExecution.serverNodeUUID != fromServerUUID) {
+            return false
+        }
+        while (!claimed) {
             try {
-                scheduleJob(se,null,null)
+                ScheduledExecution.withNewSession {
+                    scheduledExecution = ScheduledExecution.get(schedId)
+                    scheduledExecution.refresh()
+
+                    scheduledExecution.serverNodeUUID=serverUUID
+                    if (scheduledExecution.save(flush: true)) {
+                        claimed=true
+                        log.info("claimScheduledJob: schedule claimed for ${schedId} on node ${serverUUID}")
+                    } else {
+                        log.debug("claimScheduledJob: failed for ${schedId} on node ${serverUUID}")
+                    }
+                }
+            } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+                log.error("claimScheduledJob: failed for ${schedId} on node ${serverUUID}: locking failure")
+            } catch (StaleObjectStateException e) {
+                log.error("claimScheduledJob: failed for ${schedId} on node ${serverUUID}: stale data")
+            }
+        }
+        return claimed
+    }
+
+    /**
+     * Claim scheduling for any jobs assigned to fromServerUUID, or not assigned if it is null
+     * @param toServerUUID uuid to assign to scheduled jobs
+     * @param fromServerUUID uuid to claim from, or null to claim from unassigned jobs
+     *
+     * @return Map of job ID to boolean, indicating whether the job was claimed
+     */
+    def Map claimScheduledJobs(String toServerUUID, String fromServerUUID=null) {
+        Map claimed=[:]
+        ScheduledExecution.findAllByScheduledAndServerNodeUUID(true, fromServerUUID).each { ScheduledExecution se ->
+            claimed[se.extid]=claimScheduledJob(se, toServerUUID, fromServerUUID)
+        }
+        claimed
+    }
+    /**
+     * Reschedule all scheduled jobs which match the given serverUUID, or all jobs if it is null.
+     * @param serverUUID
+     * @return
+     */
+    def rescheduleJobs(String serverUUID=null) {
+        def schedJobs = serverUUID ? ScheduledExecution.findAllByScheduledAndServerNodeUUID(true, serverUUID) : ScheduledExecution.findAllByScheduled(true)
+        schedJobs.each { ScheduledExecution se ->
+            try {
+                scheduleJob(se, null, null)
                 log.error("rescheduled job: ${se.id}")
             } catch (Exception e) {
                 log.error("Job not rescheduled: ${se.id}: ${e.message}")
             }
         }
     }
-    boolean convertNonWorkflow(ScheduledExecution se){
-        def kprops=['argString','adhocLocalString','adhocRemoteString','adhocFilepath']
-        def props = se.properties.findAll{it.key=~/^(type|name|command|argString|adhocExecution|adhoc.*String|adhocFilepath)$/}
-        if(props){
-            def Workflow workflow = new Workflow(threadcount:1,keepgoing:true)
-            def cexec
-            if(props.jobName){
-                cexec = new JobExec(props)
-            }else{
-                //TODO
-                cexec = new CommandExec(props)
-            }
-            workflow.commands = new ArrayList()
-            workflow.commands.add(cexec)
-            se.workflow=workflow
-            se.adhocExecution=false
-            kprops.each{k->
-                se[k]=null
-            }
-            return true
-        }
-        return false
+    /**
+     * Claim scheduling of jobs from the given fromServerUUID, and return a map identifying successfully claimed jobs
+     * @param fromServerUUID server UUID to claim scheduling of jobs from
+     * @return map of job ID to boolean indicating reclaim was successful or not.
+     */
+    def reclaimAndScheduleJobs(String fromServerUUID){
+        def claimed=claimScheduledJobs(frameworkService.getServerUUID(), fromServerUUID)
+        rescheduleJobs(frameworkService.getServerUUID())
+        claimed
     }
-    def convertNonWorkflowJobs(){
-        def nonwfjobs = ScheduledExecution.findAllByWorkflowIsNull()
-        nonwfjobs.each{ScheduledExecution se->
-            def ok=convertNonWorkflow(se)
-            se.save()
-            log.error("Converted non-workflow job: ${se.id}: success? ${ok}")
-        }
-    }
+
     /**
      *  Return a Map with a tree structure of the available grouppaths, and their job counts
      * <pre>
@@ -351,7 +388,7 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
      * @return
      */
     def deleteScheduledExecution(ScheduledExecution scheduledExecution){
-        scheduledExecution = ScheduledExecution.lock(scheduledExecution.id)
+        scheduledExecution = ScheduledExecution.get(scheduledExecution.id)
         def jobname = scheduledExecution.generateJobScheduledName()
         def groupname = scheduledExecution.generateJobGroupName()
         def errmsg=null
@@ -381,6 +418,9 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
                 deleteJob(jobname, groupname)
                 success = true
             } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+                scheduledExecution.discard()
+                errmsg = 'Cannot delete Job "' + scheduledExecution.jobName + '" [' + scheduledExecution.extid + ']: it may have been modified or executed by another user'
+            } catch (StaleObjectStateException e) {
                 scheduledExecution.discard()
                 errmsg = 'Cannot delete Job "' + scheduledExecution.jobName + '" [' + scheduledExecution.extid + ']: it may have been modified or executed by another user'
             }
@@ -450,6 +490,7 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         
         def jobDetail = createJobDetail(se)
         def trigger = createTrigger(se)
+        jobDetail.getJobDataMap().put("bySchedule", true)
         def Date nextTime
         if(oldJobName && oldGroupName){
             def oldjob = quartzScheduler.getJobDetail(oldJobName,oldGroupName)
@@ -572,6 +613,9 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         jobDetail.getJobDataMap().put("rdeck.base",frameworkService.getRundeckBase())
         if(se.scheduled){
             jobDetail.getJobDataMap().put("userRoles",se.userRoleList)
+            if(frameworkService.isClusterModeEnabled()){
+                jobDetail.getJobDataMap().put("serverUUID",frameworkService.getServerUUID())
+            }
         }
 //            jobDetail.addJobListener("sessionBinderListener")
         jobDetail.addJobListener("defaultGrailsServiceInjectorJobListener")
@@ -598,7 +642,12 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         return names.contains(se.generateJobScheduledName())
     }
 
-    def Map nextExecutionTimes(Collection scheduledExecutions) {
+    /**
+     * Return a map of job ID to next trigger Date
+     * @param scheduledExecutions
+     * @return
+     */
+    def Map nextExecutionTimes(Collection<ScheduledExecution> scheduledExecutions) {
         def map = [ : ]
         scheduledExecutions.each {
             def next = nextExecutionTime(it)
@@ -609,7 +658,30 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         return map
     }
 
+    /**
+     * Return a map of job ID to serverNodeUUID for any jobs which are scheduled on a different server, if cluster mode is enabled.
+     * @param scheduledExecutions
+     * @return
+     */
+    def Map clusterScheduledJobs(Collection<ScheduledExecution> scheduledExecutions) {
+        def map = [ : ]
+        if(frameworkService.isClusterModeEnabled()) {
+            def serverUUID = frameworkService.getServerUUID()
+            scheduledExecutions.findAll { it.serverNodeUUID != serverUUID }.each {
+                map[it.id] = it.serverNodeUUID
+            }
+        }
+        return map
+    }
+
     public static final long TWO_HUNDRED_YEARS=1000l * 60l * 60l * 24l * 365l * 200l
+    /**
+     * Return the next scheduled or predicted execution time for the scheduled job, and if it is not scheduled
+     * return a time in the future.  If the job is not scheduled on the current server (cluster mode), returns
+     * the time that the job is expected to run on its configured server.
+     * @param se
+     * @return
+     */
     def Date nextExecutionTime(ScheduledExecution se) {
         if(!se.scheduled){
             return new Date(TWO_HUNDRED_YEARS)
@@ -617,14 +689,25 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         def trigger = quartzScheduler.getTrigger(se.generateJobScheduledName(), se.generateJobGroupName())
         if(trigger){
             return trigger.getNextFireTime()
-        }else{
+        }else if (frameworkService.isClusterModeEnabled() && se.serverNodeUUID != frameworkService.getServerUUID()) {
+            //guess next trigger time for the job on the assigned cluster node
+            def value= tempNextExecutionTime(se)
+            return value
+        } else {
             return null;
         }
     }
 
+    /**
+     * Return the Date for the next execution time for a scheduled job
+     * @param se
+     * @return
+     */
     def Date tempNextExecutionTime(ScheduledExecution se){
         def trigger = createTrigger(se)
-        return trigger.getNextFireTime()
+        List<Date> times = TriggerUtils.computeFireTimes(trigger,
+                quartzScheduler.getCalendar(trigger.getCalendarName()), 1)
+        return times?times.first():null
     }
 
     /**
@@ -710,7 +793,15 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
      * Given list of imported jobs, create, update or skip them as defined by the dupeOption parameter.
      * @return map of load results, [jobs: List of ScheduledExecutions, jobsi: list of maps [scheduledExecution: (job), entrynum: (index)], errjobs: List of maps [scheduledExecution: jobdata, entrynum: i, errmsg: errmsg], skipjobs: list of maps [scheduledExecution: jobdata, entrynum: i, errmsg: errmsg]]
      */
-    def loadJobs ( jobset, option, user, String roleList, changeinfo = [:], Framework framework ){
+    def loadJobs ( jobset, option, user, String roleList, changeinfo = [:], Framework framework ) {
+        return loadJobs(jobset, option, null, user, roleList, changeinfo, framework)
+    }
+
+    /**
+     * Given list of imported jobs, create, update or skip them as defined by the dupeOption parameter.
+     * @return map of load results, [jobs: List of ScheduledExecutions, jobsi: list of maps [scheduledExecution: (job), entrynum: (index)], errjobs: List of maps [scheduledExecution: jobdata, entrynum: i, errmsg: errmsg], skipjobs: list of maps [scheduledExecution: jobdata, entrynum: i, errmsg: errmsg]]
+     */
+    def loadJobs ( jobset, option, String uuidOption, user, String roleList, changeinfo = [:], Framework framework ){
         def jobs = []
         def jobsi = []
         def i = 1
@@ -720,17 +811,26 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
             log.debug("saving job data: ${jobdata}")
             def ScheduledExecution scheduledExecution
             def jobchange = new HashMap(changeinfo)
+            if(!jobdata.project){
+                errjobs << [scheduledExecution: jobdata, entrynum: i, errmsg: "Project was not specified"]
+                i++
+                return
+            }
+            if (uuidOption == 'remove') {
+                jobdata.uuid = null
+                jobdata.id = null
+            }
             if (option == "update" || option == "skip") {
                 //look for dupe by name and group path and project
                 def schedlist
                 //first look for uuid
-                if (jobdata.uuid) {
-                    schedlist = ScheduledExecution.findAllByUuid(jobdata.uuid)
-                } else {
+                if (jobdata.uuid && jobdata.project) {
+                    scheduledExecution = ScheduledExecution.findByUuidAndProject(jobdata.uuid,jobdata.project)
+                } else if(jobdata.jobName && jobdata.project){
                     schedlist = ScheduledExecution.findAllScheduledExecutions(jobdata.groupPath, jobdata.jobName, jobdata.project)
-                }
-                if (schedlist && 1 == schedlist.size()) {
-                    scheduledExecution = schedlist[0]
+                    if (schedlist && 1 == schedlist.size()) {
+                        scheduledExecution = schedlist[0]
+                    }
                 }
             }
             if (option == "skip" && scheduledExecution) {
@@ -759,7 +859,7 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
                         }
 
                         if (!success && scheduledExecution && scheduledExecution.hasErrors()) {
-                            errmsg = "Validation errors"
+                            errmsg = "Validation errors: "+ scheduledExecution.errors.allErrors.collect{lookupMessageError(it)}.join("; ")
                         } else {
                             logJobChange(jobchange, scheduledExecution.properties)
                         }
@@ -788,7 +888,7 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
                         def result = _dosave(jobdata, user, roleList, framework, jobchange)
                         scheduledExecution = result.scheduledExecution
                         if (!result.success && scheduledExecution && scheduledExecution.hasErrors()) {
-                            errmsg = "Validation errors"
+                            errmsg = "Validation errors: " + scheduledExecution.errors.allErrors.collect { lookupMessageError(it) }.join("; ")
                         } else if (!result.success) {
                             errmsg = result.error ?: "Failed to save job"
                         } else {
@@ -852,7 +952,51 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
             MDC.remove(k)
         }
     }
-
+    static def parseNotificationsFromParams(params){
+        def notifyParamKeys = ['notifyPlugin', 'notifyOnstart', 'notifyOnstartUrl', 'notifyOnsuccess',
+                'notifyOnfailure', 'notifyOnsuccessUrl', 'notifyOnfailureUrl']
+        if (!params.notifications && params.subMap(notifyParamKeys).any { it.value }) {
+            params.notifications = parseParamNotifications(params)
+        }
+    }
+    static List parseParamNotifications(params){
+        List nots=[]
+        if ('true' == params.notifyOnsuccess) {
+            nots << [eventTrigger: 'onsuccess', type: 'email', content: params.notifySuccessRecipients]
+        }
+        if ('true' == params.notifyOnsuccessUrl) {
+            nots << [eventTrigger: 'onsuccess', type: 'url', content: params.notifySuccessUrl]
+        }
+        if ('true' == params.notifyOnfailure) {
+            nots << [eventTrigger: 'onfailure', type: 'email', content: params.notifyFailureRecipients]
+        }
+        if ('true' == params.notifyOnfailureUrl) {
+            nots << [eventTrigger: 'onfailure', type: 'url', content: params.notifyFailureUrl]
+        }
+        if ('true' == params.notifyOnstart) {
+            nots << [eventTrigger: 'onstart', type: 'email', content: params.notifyStartRecipients]
+        }
+        if ('true' == params.notifyOnstartUrl) {
+            nots << [eventTrigger: 'onstart', type: 'url', content: params.notifyStartUrl]
+        }
+        //notifyOnsuccessPlugin
+        if (params.notifyPlugin) {
+            ['success', 'failure', 'start'].each { trig ->
+//                params.notifyPlugin.each { trig, plug ->
+                def plugs = params.notifyPlugin[trig]
+                if(plugs){
+                    def types=[plugs['type']].flatten()
+                    types.each { pluginType ->
+                        def config = plugs[pluginType]?.config
+                        if (plugs['enabled'][pluginType] == 'true') {
+                            nots << [eventTrigger: 'on' + trig, type: pluginType, configuration: config]
+                        }
+                    }
+                }
+            }
+        }
+        nots
+    }
 
     def _doupdate ( params, user, String roleList, Framework framework, changeinfo = [:] ){
         log.debug("ScheduledExecutionController: update : attempting to update: " + params.id +
@@ -895,7 +1039,14 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         if (nonopts.uuid != scheduledExecution.uuid) {
             changeinfo.extraInfo = " (internalID:${scheduledExecution.id})"
         }
+        def origJobName=scheduledExecution.jobName
+        def origGroupPath=scheduledExecution.groupPath
+
         scheduledExecution.properties = nonopts
+
+        if(!scheduledExecution.nodeThreadcount){
+            scheduledExecution.nodeThreadcount=1
+        }
 
         //fix potential null/blank issue after upgrading rundeck to 1.3.1/1.4
         if (!scheduledExecution.description) {
@@ -929,19 +1080,27 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
             params.workflow.keepgoing = true
             params['_workflow_data'] = true
         }
-        //clear old mode job properties
-        scheduledExecution.adhocExecution = false;
-        scheduledExecution.adhocRemoteString = null
-        scheduledExecution.adhocLocalString = null
-        scheduledExecution.adhocFilepath = null
 
         if (!scheduledExecution.validate()) {
             failed = true
+        }
+        if(origGroupPath!=scheduledExecution.groupPath || origJobName!=scheduledExecution.jobName){
+            //reauthorize if the name/group has changed
+            if (!frameworkService.authorizeProjectJobAll(framework, scheduledExecution, [AuthConstants.ACTION_CREATE], scheduledExecution.project)) {
+                failed = true
+                scheduledExecution.errors.rejectValue('jobName', 'ScheduledExecution.jobName.unauthorized', [AuthConstants.ACTION_CREATE, scheduledExecution.jobName].toArray(), 'Unauthorized action: {0} for value: {1}')
+                scheduledExecution.errors.rejectValue('groupPath', 'ScheduledExecution.groupPath.unauthorized', [ AuthConstants.ACTION_CREATE, scheduledExecution.groupPath].toArray(), 'Unauthorized action: {0} for value: {1}')
+            }
         }
         if (scheduledExecution.scheduled) {
             scheduledExecution.populateTimeDateFields(params)
             scheduledExecution.user = user
             scheduledExecution.userRoleList = roleList
+            if (frameworkService.isClusterModeEnabled()) {
+                scheduledExecution.serverNodeUUID = frameworkService.getServerUUID()
+            } else {
+                scheduledExecution.serverNodeUUID = null
+            }
             if (!CronExpression.isValidExpression(params.crontabString ? params.crontabString : scheduledExecution.generateCrontabExression())) {
                 failed = true;
                 scheduledExecution.errors.rejectValue('crontabString', 'scheduledExecution.crontabString.invalid.message')
@@ -972,6 +1131,8 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
             scheduledExecution.errors.rejectValue('project', 'scheduledExecution.project.invalid.message', [scheduledExecution.project].toArray(), 'Project was not found: {0}')
         }
 
+        def todiscard = []
+        def wftodelete = []
         if (scheduledExecution.workflow && params['_sessionwf'] && params['_sessionEditWFObject']) {
             //load the session-stored modified workflow and replace the existing one
             def Workflow wf = params['_sessionEditWFObject']//session.editWF[scheduledExecution.id.toString()]
@@ -1002,9 +1163,9 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
                     final Workflow newworkflow = new Workflow(wf)
                     scheduledExecution.workflow = newworkflow
                     if (oldwf) {
-                        oldwf.delete()
+                        wftodelete << oldwf
                     }
-                    wf.discard()
+                    todiscard<<wf
                 } else {
                     failed = true
                     scheduledExecution.errors.rejectValue('workflow', 'scheduledExecution.workflow.invalidstepslist.message', [failedlist.toString()].toArray(), "Invalid workflow steps: {0}")
@@ -1056,6 +1217,11 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         } else if (!scheduledExecution.workflow || !scheduledExecution.workflow.commands || scheduledExecution.workflow.commands.size() < 1) {
             failed = true
             scheduledExecution.errors.rejectValue('workflow', 'scheduledExecution.workflow.empty.message')
+        }
+
+        //validate error handler types
+        if (!validateWorkflow(scheduledExecution.workflow,scheduledExecution)) {
+            failed = true
         }
         if (( params.options || params['_nooptions']) && scheduledExecution.options) {
             def todelete = []
@@ -1122,41 +1288,35 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
 
         }
 
-        if (!params.notifications && (params.notifyOnsuccess || params.notifyOnfailure || params.notifyOnsuccessUrl || params.notifyOnfailureUrl)) {
-            def nots = []
-            if ('true' == params.notifyOnsuccess) {
-                nots << [eventTrigger: 'onsuccess', type: 'email', content: params.notifySuccessRecipients]
-            }
-            if ('true' == params.notifyOnsuccessUrl) {
-                nots << [eventTrigger: 'onsuccess', type: 'url', content: params.notifySuccessUrl]
-            }
-            if ('true' == params.notifyOnfailure) {
-                nots << [eventTrigger: 'onfailure', type: 'email', content: params.notifyFailureRecipients]
-            }
-            if ('true' == params.notifyOnfailureUrl) {
-                nots << [eventTrigger: 'onfailure', type: 'url', content: params.notifyFailureUrl]
-            }
-            params.notifications = nots
-        }
+        parseNotificationsFromParams(params)
         if (!params.notifications) {
             params.notified = 'false'
         }
-        def todiscard = []
-        if (scheduledExecution.notifications) {
-            def todelete = []
-            scheduledExecution.notifications.each {Notification note ->
-                todelete << note
-            }
-            todelete.each {
-                it.delete()
-                scheduledExecution.removeFromNotifications(it)
-                todiscard << it
-            }
-            scheduledExecution.notifications = null
-        }
+        def modifiednotifs = []
         if (params.notifications && 'false' != params.notified) {
             //create notifications
-            failed = _updateNotifications(params, scheduledExecution)
+            def result = _updateNotificationsData(params, scheduledExecution)
+            if(result.failed){
+                failed = result.failed
+            }
+            modifiednotifs=result.modified
+        }
+        //delete notifications that are not part of the modified set
+        if (scheduledExecution.notifications) {
+            def todelete = []
+            scheduledExecution.notifications.each { Notification note ->
+                if (!(note in modifiednotifs)) {
+                    todelete << note
+                }
+            }
+
+            if(!failed){
+                todelete.each {
+                    it.delete()
+                    scheduledExecution.removeFromNotifications(it)
+                    todiscard << it
+                }
+            }
         }
 
         //try to save workflow
@@ -1166,7 +1326,10 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
                 failed = true;
             } else {
                 scheduledExecution.workflow.save(flush: true)
+                wftodelete.each{it.delete()}
             }
+        }else if (failed && null!=scheduledExecution.workflow){
+            todiscard<< scheduledExecution.workflow
         }
         if (!failed) {
             if (!scheduledExecution.validate()) {
@@ -1201,90 +1364,92 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         }
 
     }
-    /**
-     * Update ScheduledExecution notification definitions based on input params.
-     *
-     * expected params: [notifications: [<eventTrigger>:[email:<content>]]]
-     */
-    private boolean _updateNotifications(Map params, ScheduledExecution scheduledExecution) {
-        boolean failed = false
-        def fieldNames = [onsuccess: 'notifySuccessRecipients', onfailure: 'notifyFailureRecipients']
-        def fieldNamesUrl = [onsuccess: 'notifySuccessUrl', onfailure: 'notifyFailureUrl']
-        params.notifications.each {notif ->
-            def trigger = notif.eventTrigger
-            if (notif && notif.type == 'email' && notif.content) {
-                def arr = notif.content.split(",")
-                arr.each {email ->
-                    if (email && !org.apache.commons.validator.EmailValidator.getInstance().isValid(email)) {
-                        failed = true
-                        scheduledExecution.errors.rejectValue(
-                                fieldNames[trigger],
-                                'scheduledExecution.notifications.invalidemail.message',
-                                [email] as Object[],
-                                'Invalid email address: {0}'
-                        )
-                    }
+    private Map validatePluginNotification(ScheduledExecution scheduledExecution, String trigger,notif,params=null){
+        //plugin type
+        def failed=false
+        def pluginDesc = notificationService.getNotificationPluginDescriptor(notif.type)
+        if (!pluginDesc) {
+            return //closure
+        }
+        def validation = notificationService.validatePluginConfig(scheduledExecution.project, notif.type, notif.configuration)
+        if (!validation.valid) {
+            failed = true
+            if(params instanceof Map){
+                if (!params['notificationValidation']) {
+                    params['notificationValidation'] = [:]
                 }
-                if (failed) {
-                    return
+                if (!params['notificationValidation'][trigger]) {
+                    params['notificationValidation'][trigger] = [:]
                 }
-                def addrs = arr.findAll {it.trim()}.join(",")
-                Notification n = new Notification(eventTrigger: trigger, type: 'email', content: addrs)
-                scheduledExecution.addToNotifications(n)
-                if (!n.validate()) {
-                    failed = true
-                    n.discard()
-                    def errmsg = trigger + " notification: " + n.errors.allErrors.collect {lookupMessageError(it)}.join(";")
-                    scheduledExecution.errors.rejectValue(
-                            fieldNames[trigger],
-                            'scheduledExecution.notifications.invalid.message',
-                            [errmsg] as Object[],
-                            'Invalid notification definition: {0}'
-                    )
-                }
-                n.scheduledExecution = scheduledExecution
-            } else if (notif && notif.type == 'url' && notif.content) {
-                def arr = notif.content.split(",")
-
-                arr.each {String url ->
-                    boolean valid = false
-                    try {
-                        new URL(url)
-                        valid = true
-                    } catch (MalformedURLException e) {
-                        valid = false
-                    }
-                    if (url && !valid) {
-                        failed = true
-                        scheduledExecution.errors.rejectValue(
-                                fieldNamesUrl[trigger],
-                                'scheduledExecution.notifications.invalidurl.message',
-                                [url] as Object[],
-                                'Invalid URL: {0}'
-                        )
-                    }
-                }
-                if (failed) {
-                    return
-                }
-                def addrs = arr.findAll {it.trim()}.join(",")
-                Notification n = new Notification(eventTrigger: trigger, type: 'url', content: addrs)
-                scheduledExecution.addToNotifications(n)
-                if (!n.validate()) {
-                    failed = true
-                    n.discard()
-                    def errmsg = trigger + " notification: " + n.errors.allErrors.collect {lookupMessageError(it)}.join(";")
-                    scheduledExecution.errors.rejectValue(
-                            fieldNamesUrl[trigger],
-                            'scheduledExecution.notifications.invalid.message',
-                            [errmsg] as Object[],
-                            'Invalid notification definition: {0}'
-                    )
-                }
-                n.scheduledExecution = scheduledExecution
+                params['notificationValidation'][trigger][notif.type] = validation
+            }
+            scheduledExecution.errors.rejectValue(
+                    'notifications',
+                    'scheduledExecution.notifications.invalidPlugin.message',
+                    [notif.type] as Object[],
+                    'Invalid Configuration for plugin: {0}'
+            )
+        }
+        if (failed) {
+            return [failed:true]
+        }
+        //TODO: better config test
+        def n = Notification.fromMap(trigger, notif)
+        [failed:failed,notification:n]
+    }
+    private Map validateEmailNotification(ScheduledExecution scheduledExecution, String trigger, notif, params = null){
+        def failed
+        def fieldNames = [onsuccess: 'notifySuccessRecipients', onfailure: 'notifyFailureRecipients', onstart: 'notifyStartRecipients']
+        def arr = notif.content.split(",")
+        arr.each { email ->
+            if(email && email.indexOf('${')>=0){
+                //don't reject embedded prop refs
+            }else if (email && !EmailValidator.getInstance().isValid(email)) {
+                failed = true
+                scheduledExecution.errors.rejectValue(
+                        fieldNames[trigger],
+                        'scheduledExecution.notifications.invalidemail.message',
+                        [email] as Object[],
+                        'Invalid email address: {0}'
+                )
             }
         }
-        return failed
+        if (failed) {
+            return [failed:true]
+        }
+        def addrs = arr.findAll { it.trim() }.join(",")
+
+        def n = new Notification(eventTrigger: trigger, type: 'email', content: addrs)
+        [failed: false, notification: n]
+    }
+    private Map validateUrlNotification(ScheduledExecution scheduledExecution, String trigger, notif, params = null){
+        def failed
+        def fieldNamesUrl = [onsuccess: 'notifySuccessUrl', onfailure: 'notifyFailureUrl', onstart: 'notifyStartUrl']
+        def arr = notif.content.split(",")
+        arr.each { String url ->
+            boolean valid = false
+            try {
+                new URL(url)
+                valid = true
+            } catch (MalformedURLException e) {
+                valid = false
+            }
+            if (url && !valid) {
+                failed = true
+                scheduledExecution.errors.rejectValue(
+                        fieldNamesUrl[trigger],
+                        'scheduledExecution.notifications.invalidurl.message',
+                        [url] as Object[],
+                        'Invalid URL: {0}'
+                )
+            }
+        }
+        if (failed) {
+            return [failed: true]
+        }
+        def addrs = arr.findAll { it.trim() }.join(",")
+        def n = new Notification(eventTrigger: trigger, type: 'url', content: addrs)
+        [failed:false,notification: n]
     }
 
     /**
@@ -1292,84 +1457,74 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
      *
      * expected params: [notifications: [<eventTrigger>:[email:<content>]]]
      */
-    private boolean _updateNotifications(ScheduledExecution params, ScheduledExecution scheduledExecution) {
+    private Map _updateNotificationsData( params, ScheduledExecution scheduledExecution) {
         boolean failed = false
         def fieldNames = [onsuccess: 'notifySuccessRecipients', onfailure: 'notifyFailureRecipients']
         def fieldNamesUrl = [onsuccess: 'notifySuccessUrl', onfailure: 'notifyFailureUrl']
+        def addedNotifications=[]
         params.notifications.each {notif ->
             def trigger = notif.eventTrigger
+            def Notification n
+            def String failureField
             if (notif && notif.type == 'email' && notif.content) {
-                def arr = notif.content.split(",")
-                arr.each {email ->
-                    if (email && !org.apache.commons.validator.EmailValidator.getInstance().isValid(email)) {
-                        failed = true
-                        scheduledExecution.errors.rejectValue(
-                                fieldNames[trigger],
-                                'scheduledExecution.notifications.invalidemail.message',
-                                [email] as Object[],
-                                'Invalid email address: {0}'
-                        )
-                    }
+                def result=validateEmailNotification(scheduledExecution,trigger,notif,params)
+                if(result.failed){
+                    failed=true
+                }else{
+                    n=result.notification
                 }
-                if (failed) {
-                    return
-                }
-                def addrs = arr.findAll {it.trim()}.join(",")
-                Notification n = new Notification(eventTrigger: trigger, type: 'email', content: addrs)
-                scheduledExecution.addToNotifications(n)
-                if (!n.validate()) {
-                    failed = true
-                    n.discard()
-                    def errmsg = trigger + " notification: " + n.errors.allErrors.collect {lookupMessageError(it)}.join(";")
-                    scheduledExecution.errors.rejectValue(
-                            fieldNames[trigger],
-                            'scheduledExecution.notifications.invalid.message',
-                            [errmsg] as Object[],
-                            'Invalid notification definition: {0}'
-                    )
-                }
-                n.scheduledExecution = scheduledExecution
+                failureField= fieldNames[trigger]
             } else if (notif && notif.type == 'url' && notif.content) {
-                def arr = notif.content.split(",")
-                arr.each {String url ->
-                    boolean valid = false
-                    try {
-                        new URL(url)
-                        valid = true
-                    } catch (MalformedURLException e) {
-                        valid = false
-                    }
-                    if (url && !valid) {
-                        failed = true
-                        scheduledExecution.errors.rejectValue(
-                                fieldNamesUrl[trigger],
-                                'scheduledExecution.notifications.invalidurl.message',
-                                [url] as Object[],
-                                'Invalid URL: {0}'
-                        )
-                    }
+
+                def result = validateUrlNotification(scheduledExecution, trigger, notif, params)
+                if (result.failed) {
+                    failed = true
+                } else {
+                    n = result.notification
                 }
-                if (failed) {
-                    return
+                failureField = fieldNamesUrl[trigger]
+            } else if (notif.type) {
+                def data=notif
+                if(notif instanceof Notification){
+                    data=[type:notif.type, configuration:notif.configuration]
                 }
-                def addrs = arr.findAll {it.trim()}.join(",")
-                Notification n = new Notification(eventTrigger: trigger, type: 'url', content: addrs)
-                scheduledExecution.addToNotifications(n)
+                def result = validatePluginNotification(scheduledExecution, trigger, data, params)
+                if (result.failed) {
+                    failed = true
+                    failureField="notifications"
+                } else {
+                    n = result.notification
+                }
+            }
+            if(n){
+                //modify existing notification
+                def oldn = scheduledExecution.findNotification(n.eventTrigger,n.type)
+                if(oldn){
+                    oldn.content=n.content
+                    n=oldn
+                }else{
+                    n.scheduledExecution = scheduledExecution
+                }
                 if (!n.validate()) {
                     failed = true
                     n.discard()
-                    def errmsg = trigger + " notification: " + n.errors.allErrors.collect {lookupMessageError(it)}.join(";")
+                    def errmsg = trigger + " notification: " + n.errors.allErrors.collect { lookupMessageError(it) }.join(";")
                     scheduledExecution.errors.rejectValue(
-                            fieldNamesUrl[trigger],
+                            failureField,
                             'scheduledExecution.notifications.invalid.message',
                             [errmsg] as Object[],
                             'Invalid notification definition: {0}'
                     )
+                    scheduledExecution.discard()
+                }else{
+                    if(!oldn){
+                        scheduledExecution.addToNotifications(n)
+                    }
+                    addedNotifications << n
                 }
-                n.scheduledExecution = scheduledExecution
             }
         }
-        return failed
+        return [failed:failed,modified:addedNotifications]
     }
     public List _doupdateJob(id, ScheduledExecution params, user, String roleList, Framework framework, changeinfo = [:]) {
         log.debug("ScheduledExecutionController: update : attempting to update: " + id +
@@ -1395,7 +1550,7 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         def oldjobgroup = scheduledExecution.generateJobGroupName()
         def oldsched = scheduledExecution.scheduled
         scheduledExecution.properties = null
-        final Collection foundprops = params.properties.keySet().findAll {it != 'lastUpdated' && it != 'dateCreated' && (params.properties[it] instanceof String || params.properties[it] instanceof Boolean) }
+        final Collection foundprops = params.properties.keySet().findAll {it != 'lastUpdated' && it != 'dateCreated' && (params.properties[it] instanceof String || params.properties[it] instanceof Boolean || params.properties[it] instanceof Integer) }
         final Map newprops = foundprops ? params.properties.subMap(foundprops) : [:]
         if (scheduledExecution.uuid) {
             newprops.uuid = scheduledExecution.uuid//don't modify uuid if it exists
@@ -1408,6 +1563,9 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         }
         //clear filter params
         scheduledExecution.clearFilterFields()
+        def origGroupPath=scheduledExecution.groupPath
+        def origJobName=scheduledExecution.jobName
+
         scheduledExecution.properties = newprops
 
         //fix potential null/blank issue after upgrading rundeck to 1.3.1/1.4
@@ -1415,18 +1573,26 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
             scheduledExecution.description = ''
         }
 
-        //clear old mode job properties
-        scheduledExecution.adhocExecution = false;
-        scheduledExecution.adhocRemoteString = null
-        scheduledExecution.adhocLocalString = null
-        scheduledExecution.adhocFilepath = null
-
         if (!scheduledExecution.validate()) {
             failed = true
+        }
+
+        if (origGroupPath != scheduledExecution.groupPath || origJobName != scheduledExecution.jobName) {
+            //reauthorize if the name/group has changed
+            if (!frameworkService.authorizeProjectJobAll(framework, scheduledExecution, [AuthConstants.ACTION_CREATE], scheduledExecution.project)) {
+                failed = true
+                scheduledExecution.errors.rejectValue('jobName', 'ScheduledExecution.jobName.unauthorized', [AuthConstants.ACTION_CREATE, scheduledExecution.jobName].toArray(), 'Unauthorized action: {0} for value: {1}')
+                scheduledExecution.errors.rejectValue('groupPath', 'ScheduledExecution.groupPath.unauthorized', [AuthConstants.ACTION_CREATE, scheduledExecution.groupPath].toArray(), 'Unauthorized action: {0} for value: {1}')
+            }
         }
         if (scheduledExecution.scheduled) {
             scheduledExecution.user = user
             scheduledExecution.userRoleList = roleList
+            if (frameworkService.isClusterModeEnabled()) {
+                scheduledExecution.serverNodeUUID = frameworkService.getServerUUID()
+            } else {
+                scheduledExecution.serverNodeUUID = null
+            }
 
             if (scheduledExecution.crontabString && (!CronExpression.isValidExpression(scheduledExecution.crontabString)
                     ||                               !scheduledExecution.parseCrontabString(scheduledExecution.crontabString))) {
@@ -1494,6 +1660,11 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
             failed = true
             scheduledExecution.errors.rejectValue('workflow', 'scheduledExecution.workflow.empty.message')
         }
+
+        //validate error handler types
+        if (!validateWorkflow(scheduledExecution.workflow,scheduledExecution)) {
+            failed = true
+        }
         if (scheduledExecution.options) {
             def todelete = []
             scheduledExecution.options.each {
@@ -1530,21 +1701,31 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         }
 
         def todiscard = []
-        if (scheduledExecution.notifications) {
-            def todelete = []
-            scheduledExecution.notifications.each {Notification note ->
-                todelete << note
-            }
-            todelete.each {
-                it.delete()
-                scheduledExecution.removeFromNotifications(it)
-                todiscard << it
-            }
-            scheduledExecution.notifications = null
-        }
+        def modifiednotifs=[]
         if (params.notifications) {
             //create notifications
-            failed = _updateNotifications(params, scheduledExecution)
+            def result = _updateNotificationsData(params, scheduledExecution)
+            if (result.failed) {
+                failed = result.failed
+            }
+            modifiednotifs=result.modified
+        }
+
+        //delete notifications that are not part of the modified set
+        if (scheduledExecution.notifications) {
+            def todelete = []
+            scheduledExecution.notifications.each { Notification note ->
+                if(!(note in modifiednotifs)){
+                    todelete << note
+                }
+            }
+            if(!failed){
+                todelete.each {
+                    it.delete()
+                    scheduledExecution.removeFromNotifications(it)
+                    todiscard << it
+                }
+            }
         }
 
         //try to save workflow
@@ -1653,6 +1834,31 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
         }
     }
 
+    /**
+     * Validate workflow command error handler types, return true if valid
+     * @param workflow
+     * @param scheduledExecution
+     * @return
+     */
+    def boolean validateWorkflow(Workflow workflow, ScheduledExecution scheduledExecution){
+        def valid=true
+        //validate error handler types
+        if (workflow?.strategy == 'node-first') {
+            //if a step is a Node step and has an error handler
+            def cmdi = 1;
+            workflow.commands.each { WorkflowStep step ->
+                if(step.errorHandler && step.nodeStep && !step.errorHandler.nodeStep){
+                    //reject if the Error Handler is not a node step
+                    step.errors.rejectValue('errorHandler', 'WorkflowStep.errorHandler.nodeStep.invalid', [cmdi] as Object[], "Step {0}: Must have a Node Step as an Error Handler")
+                    scheduledExecution?.errors.rejectValue('workflow', 'Workflow.stepErrorHandler.nodeStep.invalid', [cmdi] as Object[], "Step {0}: Must have a Node Step as an Error Handler")
+                    valid = false
+                }
+                cmdi++
+            }
+        }
+        return valid
+    }
+
     def _dovalidate (Map params, user, String roleList, Framework framework ){
         log.debug("ScheduledExecutionController: save : params: " + params)
         boolean failed = false;
@@ -1692,16 +1898,16 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
             params.workflow.threadcount = 1
             params.workflow.keepgoing = true
         }
-        //clear old mode job properties
-        scheduledExecution.adhocExecution = false;
-        scheduledExecution.adhocRemoteString = null
-        scheduledExecution.adhocLocalString = null
-        scheduledExecution.adhocFilepath = null
 
         def valid = scheduledExecution.validate()
         if (scheduledExecution.scheduled) {
             scheduledExecution.user = user
             scheduledExecution.userRoleList = roleList
+            if (frameworkService.isClusterModeEnabled()) {
+                scheduledExecution.serverNodeUUID = frameworkService.getServerUUID()
+            }else{
+                scheduledExecution.serverNodeUUID = null
+            }
 
             scheduledExecution.populateTimeDateFields(params)
 
@@ -1845,6 +2051,11 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
             scheduledExecution.errors.rejectValue('workflow', 'scheduledExecution.workflow.empty.message')
         }
 
+        //validate error handler types
+        if(!validateWorkflow(scheduledExecution.workflow,scheduledExecution)){
+            failed = true
+        }
+
         if (scheduledExecution.argString) {
             try {
                 scheduledExecution.argString.replaceAll(/\$\{DATE:(.*)\}/, { all, tstamp ->
@@ -1921,25 +2132,14 @@ class ScheduledExecutionService /*implements ApplicationContextAware*/{
                 }
             }
         }
-        if (!params.notifications && (params.notifyOnsuccess || params.notifyOnfailure || params.notifyOnsuccessUrl || params.notifyOnfailureUrl)) {
-            def nots = []
-            if ('true' == params.notifyOnsuccess) {
-                nots << [eventTrigger: 'onsuccess', type: 'email', content: params.notifySuccessRecipients]
-            }
-            if ('true' == params.notifyOnsuccessUrl) {
-                nots << [eventTrigger: 'onsuccess', type: 'url', content: params.notifySuccessUrl]
-            }
-            if ('true' == params.notifyOnfailure) {
-                nots << [eventTrigger: 'onfailure', type: 'email', content: params.notifyFailureRecipients]
-            }
-            if ('true' == params.notifyOnfailureUrl) {
-                nots << [eventTrigger: 'onfailure', type: 'url', content: params.notifyFailureUrl]
-            }
-            params.notifications = nots
-        }
+
+        parseNotificationsFromParams(params)
         if (params.notifications) {
             //create notifications
-            failed = _updateNotifications(params, scheduledExecution)
+            def result = _updateNotificationsData(params, scheduledExecution)
+            if (result.failed) {
+                failed = result.failed
+            }
         }
         if (scheduledExecution.doNodedispatch) {
             if (       !scheduledExecution.nodeInclude

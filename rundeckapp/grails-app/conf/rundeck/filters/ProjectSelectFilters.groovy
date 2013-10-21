@@ -1,6 +1,7 @@
 package rundeck.filters
 
 import com.dtolabs.rundeck.core.common.Framework
+import rundeck.filters.AA_TimerFilters
 
 /*
 * Copyright 2010 DTO Labs, Inc. (http://dtolabs.com)
@@ -46,23 +47,17 @@ import com.dtolabs.rundeck.core.common.Framework
 public class ProjectSelectFilters {
     def userService
     def frameworkService
+    
+    def dependsOn = [ApiRequestFilters]
+    
     def filters = {
-        /**
-         * check api request and bypass the project defaulting/selection if so.  Filters are not applied in
-         * determinate order, so ApiRequestFilters might not have been called yet.
-         */
-        testApi(uri: '/api/**') {
-            before={
-                request.is_api_req=true
-            }
-        }
         /**
          * on first user login, set the session.project if it is not set, to the last user project selected, or
          * to the first project in the available list 
          */
         projectSelection(controller: 'framework', action: '(createProject|selectProject|projectSelect|noProjectAccess|(create|save|check|edit|view)ResourceModelConfig)',invert:true) {
             before = {
-                if (request.api_version || request.is_api_req) {
+                if (request.is_allowed_api_request || request.api_version || request.is_api_req) {
                     //only default the project if not an api request
                     return
                 }
@@ -76,7 +71,7 @@ public class ProjectSelectFilters {
 
 
                     def selected = params.project
-                    if (selected && !frameworkService.existsFrameworkProject(selected, fw)) {
+                    if (selected && (!frameworkService.existsFrameworkProject(selected, fw) || !frameworkService.authorizeApplicationResourceAll(fw, [type: 'project', name: selected], ['read']))) {
                         selected = null
                     }
                     if (selected) {
@@ -86,7 +81,7 @@ public class ProjectSelectFilters {
 
                     selected = session.project
                     //check project exists
-                    if (selected && !frameworkService.existsFrameworkProject(selected, fw)) {
+                    if (selected && (!frameworkService.existsFrameworkProject(selected, fw) || !frameworkService.authorizeApplicationResourceAll(fw, [type: 'project', name: selected], ['read']))) {
                         selected = null
                     }
                     if (selected) {
@@ -95,7 +90,7 @@ public class ProjectSelectFilters {
                     }
                     //use last stored filter pref
                     def prefs = userService.getFilterPref(session.user)
-                    if (prefs.project && frameworkService.existsFrameworkProject(prefs.project, fw)) {
+                    if (prefs.project && (!frameworkService.existsFrameworkProject(prefs.project, fw) || !frameworkService.authorizeApplicationResourceAll(fw, [type: 'project', name: prefs.project], ['read']))) {
                         selected = prefs.project
                     }
                     if (selected) {
@@ -115,6 +110,7 @@ public class ProjectSelectFilters {
                         }else{
                             redirect(action: 'createProject', controller: 'framework')
                         }
+                        AA_TimerFilters.afterRequest(request, response, session)
                         return false
                     }
                 }

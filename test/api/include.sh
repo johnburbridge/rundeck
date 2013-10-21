@@ -2,7 +2,8 @@
 
 # common header for test scripts
 
-DIR=$(cd `dirname $0` && pwd)
+SRC_DIR=$(cd `dirname $0` && pwd)
+DIR=${TMP_DIR:-$SRC_DIR}
 
 errorMsg() {
    echo "$*" 1>&2
@@ -19,7 +20,10 @@ assert(){
 }
 
 # modify to point to xmlstarlet
-XMLSTARLET=xml
+XMLSTARLET=${XMLSTARLET:-xmlstarlet}
+
+RDECK_PROJECTS=${RDECK_PROJECTS:-$RDECK_BASE/projects}
+RDECK_ETC=${RDECK_ETC:-$RDECK_BASE/etc}
 
 # xmlstarlet select xpath
 # usage: xmlsel XPATH file
@@ -29,7 +33,7 @@ xmlsel(){
     $XMLSTARLET sel -T -t -v "$xpath" $*
 }
 
-API_CURRENT_VERSION=6
+API_CURRENT_VERSION=9
 
 API_VERSION=${API_VERSION:-$API_CURRENT_VERSION}
 

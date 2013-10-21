@@ -5,7 +5,7 @@
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
     <meta name="layout" content="base"/>
     <meta name="tabpage" content="nodes"/>
-    <title><g:message code="gui.menu.Run"/></title>
+    <title><g:message code="gui.menu.Nodes"/> - ${session.project.encodeAsHTML()}</title>
     <g:javascript library="executionControl"/>
     <g:javascript library="yellowfade"/>
     <g:javascript library="pagehistory"/>
@@ -36,6 +36,10 @@
             $$('.filterAdd').each(Element.show);
             $$('.nfilteritem input').each(function(e){e.value='';});
             return false;
+        }
+        function _submitNodeFilters(){
+            $$('.execCommand').each(function(e){e.setValue($F('runFormExec'));});
+            return true;
         }
 
         /*********
@@ -307,12 +311,24 @@
             }
         }
         function disableRunBar(){
-            $('runbox').down('input[type="text"]').disable();
-            $('runbox').down('button').disabled=true;
+            if($('runbox')){
+                $('runbox').down('input[type="text"]').disable();
+                if ($('runbox').down('button')) {
+                    $('runbox').down('button').disabled = true;
+                    $('runbox').down('button').addClassName('disabled');
+                    $('runbox').down('button').innerHTML="Running…";
+                }
+            }
         }
         function enableRunBar(){
-            $('runbox').down('input[type="text"]').enable();
-            $('runbox').down('button').disabled=false;
+            if ($('runbox')) {
+                $('runbox').down('input[type="text"]').enable();
+                if($('runbox').down('button')){
+                    $('runbox').down('button').disabled=false;
+                    $('runbox').down('button').removeClassName('disabled');
+                    $('runbox').down('button').innerHTML = "Run";
+                }
+            }
         }
         function collapseNodeView(){
 //            $$('.obs_shownodes').each(Element.show);
@@ -337,6 +353,7 @@
             running=false;
             $$('.showafterrun').each(Element.show);
             $$('.hideafterrun').each(Element.hide);
+            $('runFormExec').focus();
         }
         function runError(msg){
             $('runerror').innerHTML=msg;
@@ -353,7 +370,7 @@
          * @param elem
          */
         function runFormSubmit(elem){
-            if(running){
+            if(running || !$F('runFormExec')){
                 return false;
             }
             var data = Form.serialize(elem);
@@ -370,6 +387,7 @@
                     try{
                     startRunFollow(data);
                     }catch(e){
+                        console.log(e);
                         runError(e);
                     }
                 },
@@ -394,11 +412,12 @@
                 onComplete: function(transport) {
                     if (transport.request.success()) {
                         Element.show('runcontent');
-                        try{
+//                        try{
                         continueRunFollow(data);
-                        }catch(e){
-                            runError(e);
-                        }
+//                        }catch(e){
+//                            console.log(e,e);
+//                            runError(e);
+//                        }
                     }
                 },
                 onFailure:requestFailure
@@ -412,11 +431,15 @@
         function continueRunFollow(data){
              var followControl = new FollowControl(data.id,'runcontent',{
                 extraParams:"<%="true" == params.disableMarkdown ? '&disableMarkdown=true' : ''%>",
-                iconUrl: "${resource(dir: 'images', file: 'icon')}",
+                smallIconUrl: "${resource(dir: 'images', file: 'icon-small')}",
+                iconUrl: "${resource(dir: 'images', file: 'icon-small')}",
                 lastlines: ${params.lastlines ? params.lastlines : defaultLastLines},
                 maxLastLines: ${maxLastLines},
+                 showFinalLine: {value: false, changed: false},
+                 colStep:{value:false},
                 tailmode: true,
                  taildelay:1,
+                 truncateToTail:true,
                 execData: {node:"test"},
                 appLinks:appLinks,
                 onComplete:onRunComplete,
@@ -459,7 +482,7 @@
         /** START history
          *
          */
-        var histControl = new HistoryControl('histcontent',{compact:true,nofilters:true,projFilter:'${session.project}'});
+        var histControl = new HistoryControl('histcontent',{xcompact:false,nofilters:true,projFilter:'${session.project}'});
         function loadHistory(){
             histControl.loadHistory();
         }
@@ -480,6 +503,19 @@
                     enableRunBar();
                 }else{
                     disableRunBar();
+                }
+                if(null !=data.total){
+                    $$('.obs_nodes_page_total').each(function(e){
+                        e.innerHTML=data.total;
+                    });
+                }
+                if(null!=data.allcount){
+                    $$('.obs_nodes_allcount').each(function (e) {
+                        e.innerHTML = data.allcount;
+                    });
+                    $$('.obs_nodes_allcount_plural').each(function (e) {
+                        e.innerHTML = data.allcount==1?'':'s';
+                    });
                 }
             }
         }
@@ -589,7 +625,19 @@
 
         #runcontent{
             overflow-x:auto;
-            margin:10px 0;
+            margin-bottom: 20px;;
+        }
+
+        .commandcontent{
+            margin:0;
+        }
+        .inlinestatus{
+            padding: 10px;
+            background: #ddd;
+        }
+
+        table.execoutput {
+            font-size: 100%;
         }
         div.header{
             padding:3px 10px;
@@ -618,76 +666,57 @@
 </head>
 <body>
 
-<div class="pageBody">
-    <span class="prompt">Now running <span class="nowrunningcount">(0)</span></span>
-    <div id="nowrunning">
-        <span class="note empty">No running Jobs</span>
-    </div>
-
-    <div id="error" class="error message" style="display:none;"></div>
-</div>
 <g:if test="${session.user && User.findByLogin(session.user)?.nodefilters}">
     <g:set var="filterset" value="${User.findByLogin(session.user)?.nodefilters}"/>
 </g:if>
 <div id="nodesContent">
     <g:set var="run_authorized" value="${auth.adhocAllowedTest( action:AuthConstants.ACTION_RUN)}"/>
-    <g:set var="run_enabled" value="${run_authorized }"/>
 
-    <g:if test="${session.project }">
-        <div class="runbox" id="runbox">
-        %{--<g:form action="execAndForget" controller="scheduledExecution" method="post" style="display:inline" onsubmit="return runFormSubmit(this);">--}%
-            Command:
-            <g:img file="icon-small-shell.png" width="16px" height="16px"/>
-            <g:if test="${run_enabled}">
-                <g:hiddenField name="project" value="${session.project}"/>
-                <g:hiddenField name="doNodedispatch" value="true"/>
-                <g:hiddenField name="nodeKeepgoing" value="true"/>
-                <g:hiddenField name="nodeThreadcount" value="1"/>
-                <g:hiddenField name="description" value=""/>
-
-                <g:hiddenField name="workflow.commands[0].adhocExecution" value="true"/>
-                <g:hiddenField name="workflow.threadcount" value="1"/>
-                <g:hiddenField name="workflow.keepgoing" value="false"/>
-                <g:hiddenField name="workflow.project" value="${session.project}"/>
-                <g:render template="nodeFiltersHidden" model="${[params:params,query:query]}"/>
-            </g:if>
-            <g:if test="${run_enabled}">
-                <g:textField name="workflow.commands[0].adhocRemoteString" size="80" placeholder="Enter a shell command" autofocus="true" />
-            </g:if>
-            <g:else>
-                <input type="text" name="workflow.commands[0].adhocRemoteString" size="80" placeholder="Enter a shell command" autofocus="true" disabled/>
-            </g:else>
-        %{--</g:form>--}%
-            <g:if test="${run_authorized}">
-                <button onclick="runFormSubmit('runbox');" ${run_enabled?'':'disabled'}>Run</button>
-            </g:if>
-            <g:else>
-                <span class="button disabled" title="You are not authorized to run ad-hoc jobs">Run</span>
-            </g:else>
-
-            <div class="hiderun" id="runerror" style="display:none"></div>
-        </div>
-        <div class="runbox nodesummary ">
-            <g:expander classnames="button obs_shownodes" key="${rkey}nodeForm" open="true">
-            <span class="match">${total} Node${1 != total ? 's' : ''}</span>
-            </g:expander>
-            <g:if test="${null!=allcount}">
-                (of ${allcount})
-            </g:if>
-            <span class="type">
-            <g:if test="${!filterName}">
-                matching filter input
-            </g:if>
-            <g:else>
-                matching filter '${filterName}'
-            </g:else>
-            </span>
-        </div>
-    </g:if>
-<div class="pageBody">
 
 <g:render template="/common/messages"/>
-<div id="${rkey}nodeForm" class="nodeview">
+    <div id="error" class="error message" style="display:none;"></div>
+    <g:if test="${session.project}">
+        <div class="runbox primary nodesummary ">
+            <g:if test="${run_authorized}">
+                <g:expander classnames="button obs_shownodes" key="${rkey}nodeForm" open="true">
+                    <span class="match"><span class="obs_nodes_allcount">${total}</span> Node<span class="obs_nodes_allcount_plural">${1 != total ? 's' : ''}</span>
+                    </span>
+                </g:expander>
+            </g:if>
+            <g:else>
+                <span class="match"><span class="obs_nodes_allcount">${total}</span> Node<span class="obs_nodes_allcount_plural">${1 != total ? 's' : ''}</span>
+                </span>
+            </g:else>
+
+            <span class="type">
+                <g:if test="${filterName}">
+                    for filter '${filterName}'
+                </g:if>
+            </span>
+            <span id='nodedetaillist'>
+
+            </span>
+            <g:if test="${session.project && run_authorized}">
+                <span class="runbox primary" id="runbox">
+                    <g:img file="icon-small-shell.png" width="16px" height="16px"/>
+
+                    <g:hiddenField name="project" value="${session.project}"/>
+                    <g:render template="nodeFiltersHidden" model="${[params: params, query: query]}"/>
+                    <g:textField name="exec" size="50" placeholder="Enter a shell command"
+                                 value="${runCommand}"
+                                 id="runFormExec"
+                                 autofocus="true"/>
+
+                    <button class="runbutton" onclick="runFormSubmit('runbox');" >
+                        Run
+                    </button>
+
+                    <div class="hiderun" id="runerror" style="display:none"></div>
+                </span>
+            </g:if>
+        </div>
+    </g:if>
+<div id="${rkey}nodeForm" class="nodeview pageBody">
     <g:set var="wasfiltered" value="${paginateParams?.keySet().grep(~/(?!proj).*Filter|groupPath|project$/)||(query && !query.nodeFilterIsEmpty())}"/>
     <g:set var="filtersOpen" value="${params.createFilters||params.editFilters||params.saveFilter || filterErrors?true:false}"/>
 
@@ -695,7 +724,7 @@
         <tr>
         <g:if test="${!params.nofilters}">
         <td style="text-align:left;vertical-align:top; width:400px; ${wdgt.styleVisible(if:filtersOpen)}" id="${rkey}filter">
-            <g:form action="nodes" controller="framework" >
+            <g:form action="nodes" controller="framework">
                 <g:if test="${params.compact}">
                     <g:hiddenField name="compact" value="${params.compact}"/>
                 </g:if>
@@ -712,16 +741,16 @@
                     <table class="simpleForm">
                         <g:render template="nodeFilterInputs" model="${[params:params,query:query]}"/>
                     </table>
+                    <g:hiddenField name="exec" value="" class="execCommand"/>
                     <div>
-
                         <div class=" " style="text-align:right;">
-                            <g:submitButton  name="Filter" id="nodefiltersubmit" value="Filter"/>
+                            <g:submitButton  name="Filter" onclick="return _submitNodeFilters();" id="nodefiltersubmit" value="Filter"/>
 
                             <g:submitButton name="Clear" onclick="return _clearNodeFilters();" value="Clear"/>
                         </div>
                     </div>
                 </div>
-                </g:form>
+            </g:form>
         </td>
             </g:if>
             <td style="text-align:left;vertical-align:top;" id="${rkey}nodescontent">
@@ -735,12 +764,12 @@
                     </g:if>
                 </g:if>
                 <g:if test="${!params.nofilters}">
-                <div style="margin: 10px 0 5px 0;" id="${rkey}nodesfilterholder" >
+                <div id="${rkey}nodesfilterholder" >
                     %{--<g:if test="${wasfiltered}">--}%
 
 
-                        <div style="margin:5px 0; padding:5px 0;">
-                            <span style="padding:5px 0;margin:5px 0;${!filtersOpen?'':'display:none;'} " id='${rkey}filterdispbtn' >
+                        <div >
+                            <span style="${!filtersOpen?'':'display:none;'} " id='${rkey}filterdispbtn' >
                             <span title="Click to modify filter" class="info textbtn query action obs_filtertoggle" >
                                 <g:render template="displayNodeFilters" model="${[displayParams:query]}"/>
                                 <img src="${resource(dir:'images',file:'icon-tiny-disclosure.png')}" width="12px" height="12px"/></span>
@@ -756,46 +785,24 @@
                         <g:if test="${filterset}">
                             <g:render template="/common/selectFilter" model="[filterset:filterset,filterName:filterName,prefName:'nodes',noSelection:filterName?'-Server Node-':null]"/>
                         </g:if>
-                        <g:if test="${!params.Clear && !params.formInput}">
+                        <g:if test="${params.formInput}">
                             <g:form action="nodes" style="display: inline">
                                 <g:hiddenField name="formInput" value="true"/>
-                                <button name="Clear" value="Clear">Show all nodes</button>
+                                <g:hiddenField name="exec" value="" class="execCommand"/>
+                                <button name="Clear" value="Clear" onclick="return _submitNodeFilters();">Show all nodes</button>
                             </g:form>
                         </g:if>
                         </div>
 
-                    %{--</g:if>--}%
-                    %{--<g:else>
-                        <span class="prompt action" onclick="['${rkey}filter','${rkey}filterdispbtn','runbox'].each(Element.toggle);if(${isCompact}){$('${rkey}nodescontent').toggle();}" id="${rkey}filterdispbtn"  style="${!filtersOpen?'':'display:none;'}">
-                            Filter
-                            <img src="${resource(dir:'images',file:'icon-tiny-disclosure.png')}" width="12px" height="12px"/></span>
-                        <g:if test="${filterset}">
-                            <span style="margin-left:10px;">
-                                <span class="info note">Filter:</span>
-                                <g:render template="/common/selectFilter" model="[filterset:filterset,filterName:filterName,prefName:'nodes']"/>
-                            </span>
-                        </g:if>
-                    </g:else>--}%
+
                 </div>
                 </g:if>
 
-                %{--<div class="nodesummary clear nodeview">--}%
-                    %{--<span class="match">${total}/${allcount} Node${1 != allcount ? 's' : ''}</span>--}%
-                    %{--<span class="type">--}%
-                    %{--<g:if test="${!filterName}">--}%
-                        %{--matching filter input--}%
-                    %{--</g:if>--}%
-                    %{--<g:else>--}%
-                        %{--matching saved filter--}%
-                    %{--</g:else>--}%
-                    %{--</span>--}%
-                %{--</div>--}%
+
 
                 <div class=" clear matchednodes " id="nodelist" >
                     <span class="button action receiver" onclick="expandResultNodes();">Show ${total} Node${1 != total ? 's' : ''}...</span>
-                    %{--<g:render template="nodes" model="${[nodes:allnodes,totalexecs:totalexecs,jobs:jobs,params:params,expanddetail:true]}"/>--}%
                     <g:javascript>
-
                         fireWhenReady('nodelist',expandResultNodes);
                     </g:javascript>
 
@@ -805,17 +812,26 @@
 
                 </tr>
             </table>
-</div>
-<div id="runcontent"></div>
 
-    </div>
-    <div class="runbox">History</div>
+</div>
+
+
+    <div id="runcontent"></div>
+
+    <g:if test="${run_authorized}">
+    <div class="runbox"><g:message code="page.section.Activity" /></div>
+
     <div class="pageBody">
-        <div id="histcontent"></div>
+        <table cellpadding="0" cellspacing="0" class="jobsList list history" style="width:100%">
+            <tbody id="nowrunning"></tbody>
+            <tbody id="histcontent"></tbody>
+        </table>
         <g:javascript>
             fireWhenReady('histcontent',loadHistory);
         </g:javascript>
     </div>
+    </g:if>
+
 </div>
 <div id="loaderror"></div>
 </body>

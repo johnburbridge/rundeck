@@ -5,22 +5,22 @@
 This chapter covers the basics for using Rundeck. The chapter begins
 by describing the Rundeck user interfaces, both its graphical and
 command line. From there it will show you how to set up a project and
-learn about command execution. You will learn more about using the
-command dispatcher to control execution and finally, how to find and
+learn about command execution. You will learn more about 
+how to control execution and finally, how to find and
 use history.
 
 ## Rundeck Interfaces 
 
 Rundeck provides two primary user interfaces:
 
-* An HTML-based graphical console 
-* A suite of shell tools
+* An HTML-based graphical console.
+* A suite of shell tools.
 
 Both interfaces allow you to view resources, dispatch commands, as
 well as, store and run jobs.
 
 In addition Rundeck provides a Web API which can be used to interact with
-the server programattically. See [Rundeck API](../api/index.html).
+the server programatically. See [Rundeck API](../api/index.html).
 
 ### Graphical Console 
 
@@ -32,23 +32,17 @@ The default port for the web interface is `4440`, so try this URL:
 
 <http://localhost:4440>
 
-You will be shown the Login page.  The default username and password are `admin`/`admin`, so enter those in the fields.
+You will be shown the Login page.  
+The default username and password are `admin`/`admin`.
 
 #### Navigation
 
 The Rundeck page header contains global navigation control to move
-between tabbed pages: Run,  Jobs and History. It also has links to
-logout, view your user profile and a link to this online help.
+between tabbed pages: Jobs, Nodes and Activity. It also has links to
+Configure the project, logout, view your user profile and a link to this online help.
 
 ![Top navigation bar](../figures/fig0201.png)
 
-Run
-
-:    The Run page is used to execute ad hoc commands. It
-     displays filtered Node resources configured in your
-     Project resource model. A filter  control can be used to 
-     limit the listing to just the Node resources
-     matching the filter criteria.
 
 Jobs
 
@@ -57,53 +51,47 @@ Jobs
      Jobs matching the filtering criteria. These filter settings can be
      saved to a Users profile. Only authorized jobs will be visible.
 
-History
+Nodes
 
-:    From the History page, one can view currently executing commands
-     in the "Now Running" area or browse execution history. The execution
+:    The Nodes page is used to browse your Nodes configured in your
+     Project resource model. A filter  control can be used to 
+     limit the listing to just the Node resources
+     matching the filter criteria. Given the appropriate authorization
+     you can also execute ad hoc commands to your filtered node set.
+
+Activity
+
+:    From the Activity page, one can view currently executing commands
+     and Jobs or browse execution history. The execution
      history can be filtered based on user selected parameters. Once the
      filter has been set, the matching history is displayed. The current
      filter settings also configure an RSS link, found in the top right of
-     the page.
+     the page (see Rundeck Administration to enable RSS). 
 
 Project menu
 
 :    The top navigation bar contains a menu to select the
      desired project. If only one project exists, the menu will
-     automatically be defaulted.
+     automatically be selected. You can create new projects from
+     this menu, too.
      
-Admin
+Configure
 
 :    If your login belongs to the "admin" group and therefore granted
-     "admin" privileges, a wrench icon will be displayed next to your login
-     name. This page allows the admin to view group memberships for all
+     "admin" privileges, a "Configure" tab will be displayed next to your login
+     name. This page allows the admin to manage Project configuration. 
+     From the Configure page you can also export and import project archives.
+     The Configure page also allows the admin to view group memberships for all
      users, as well as, edit their profile data.
 
-User profile
+User
 
-:    Shows a page showing group memberships.
-
-Logout
-
-:    Pressing this link ends the login session and will require a subsequent login.
+:    Shows a popup menu to logout and view your profile page showing group memberships.
 
 Help
 
-:    Opens a page to the online help system.
+:    Opens a page to this user manual.
 
-
-#### Now running
-
-The "Now running" section appears at the top of the Run and Jobs pages
-and provides a view into the execution queue.
-Any currently executing ad hoc command or Job will be listed
-and include information like the name of the job, when it started,
-who ran it, and a link to the execution output.
-
-![Now running](../figures/fig0215.png)
-
-Jobs that have been run before also have a progress bar approximating 
-duration.
 
 ### Shell Tools 
 
@@ -113,17 +101,17 @@ command tools are an alternative to functions accessible in the
 graphical console.
 
 [dispatch]
-  ~ Execute ad hoc commands and scripts
+  ~ Execute ad hoc commands and scripts.
 [rd-queue]
-  ~ Query the dispatcher for currently running Jobs and possibly kill them  
+  ~ Query Rundeck for currently running Jobs and possibly kill them.
 [rd-jobs]
-  ~ List defined jobs as well as load them from text file definitions
+  ~ List defined jobs as well as load them from text file definitions.
 [run]
-  ~ Invoke the execution of a stored Job
+  ~ Invoke the execution of a stored Job.
 [rd-project]
-  ~ Setup a new Rundeck project
+  ~ Setup a new Rundeck project.
 [rd-setup]
-  ~ (Re-)configure an instance of Rundeck   
+  ~ (Re-)configure an instance of Rundeck.
   
 Consult the online manual pages for options and usage information.
 
@@ -150,10 +138,11 @@ create a new project.
 ![Create project prompt](../figures/fig0203-a.png)
 
 To start with, the only field you need to enter is the Project Name. You can
-change the other values later from the [GUI Admin Page](../administration/configuration.html#gui-admin-page).
+change the other values later from the 
+[GUI Configure Page](../administration/configuration.html#gui-admin-page).
 
 After entering your project name, Rundeck initializes it and returns
-you to the "Run" page.
+you to the "Jobs" page.
 
 Projects can be created at any time by going back to the Project menu 
 and selecting the "Create a new project..." item.
@@ -185,12 +174,14 @@ distinguished with the word "server" in red text.
 
 ### Resource model
 
-The Resource Model is the set of available Nodes that Rundeck can dispatch commands to, and their associated metadata. Each Rundeck Project has its own Resource Model.
+The Resource Model is the set of available Nodes that
+Rundeck can dispatch commands to, and their associated metadata. 
+Each Rundeck Project has its own Resource Model.
 
 The initial resource model will contain
 information just about the Rundeck server host and is useful just for
 running local commands on the Rundeck server. 
-You can browse the project resource model by going to the "Run" page.
+You can browse the project resource model by going to the "Jobs" page.
 
 In the shell, you can list the Node resources in a resource
 model using the shell tool, `dispatch`. 
@@ -210,20 +201,21 @@ a verbose listing that includes more detail:
         tags: ''
 
 Node resources have standard properties, such as "hostname" but these
-can be extended via attributes. One of the more useful properties
-is the "tags" property. A *tag* is a text label that you give to the
+can be extended via attributes. One of the more useful attributes
+is "tags". A *tag* is a text label that you give to the
 Node, perhaps denoting a classification, a role the node plays in the
-environment, or group membership. Multiple tags can be defined for
+environment, or group membership. A list of tags can be defined for
 a given node. 
 
 The output above shows the "strongbad" node currently has an empty
 tags property: `tags: ''`. 
 
 It is important to start thinking about node tagging for the nodes you manage
-because you will use them later when specifying filtering
-options to drive distributed command dispatch.
+because you will use them later when specifying node filtering
+options.
 
-Each Project has a configuration file called [project.properties](../administration/configuration.html#project.properties),
+Each Project has a configuration file called 
+[project.properties](../administration/configuration.html#project.properties),
 located at this path:
 `$RDECK_BASE/projects/`_project_`/etc/project.properties`.
 
@@ -234,13 +226,14 @@ storing resource model data:
 * `project.resources.url`: URL to an external resource model source (optional)
 
 In addition, multiple pluggable "Resource Model Sources" can be configured for a project
-to retrieve additional Resource Model content from other sources. See [Resource Model Sources](plugins.html#resource-model-sources).
+to retrieve additional Resource Model content from other sources. 
+See [Resource Model Sources](plugins.html#resource-model-sources).
 
 You can configure Rundeck to retrieve and store resource model data
 from any source, so long as it can produce one of the Rundeck resource model
 document formats. (See 
-[Resource Model Document formats](rundeck-basics.html#resource-model-document-formats).) Set the 
-`project.resource.url` to the URL resource model source of your choice.
+[Resource Model Document formats](rundeck-basics.html#resource-model-document-formats).) 
+Set the `project.resource.url` to the URL resource model source of your choice.
 
 Here's the XML document stored for the "examples" project that corresponds
 to the output printed by the `dispatch -v` shown earlier:
@@ -255,9 +248,9 @@ to the output printed by the `dispatch -v` shown earlier:
     </project>
 
 You'll notice the root node is called `project` and there is a single
-node descriptor for "strongbad". The `node` tag has a number of
+node descriptor for "strongbad". The `node` element has a number of
 required and optional attributes. Additional node descriptors can be
-added by defining new `node` elements inside the `project` tag. 
+added by defining new `node` elements inside the `project` root element. 
 
 The strongbad host does not have any tags defined for it. One or
 more tags can be defined. Use comma for the delimiter (e.g, `tags="tag1,tag2"`).
@@ -282,11 +275,12 @@ considered the authority of knowledge about the nodes
 deployed in your network. Therefore, it is best to create an interface
 to the authoritative tool and expose it as Rundeck URL resource model source. This
 can be done as a simple CGI script that does a transformation from
-the tool's format to the one Rundeck understands.
+the tool's format to the one Rundeck understands. You can also
+develop a plugin to interface with the external source.
 
 Of course, a rudimentary alternative is to maintain this information
 as an XML document, storing it in a source repository that is
-periodically exported to Rundeck. This method could be practical if
+periodically exported to Rundeck. This method would be practical if
 your host infrastructure infrequently changes.
 
 Check the Rundeck web site for URL resource model sources. If you are
@@ -303,44 +297,40 @@ Rundeck currently has two resource model document formats built in:
 
 You can enable more formats using [Resource Format Plugins](plugins.html#resource-format-plugins).
 
-## Pluggable Resource Model Sources
+### Pluggable Resource Model Sources
 
 Each project can have multiple sources for Resource model information, and
 you can use or write plugins to enable new sources for entries in the Resource model.
 
 You can configure the sources via the GUI from the Admin page, see
-[GUI Admin Page](../administration/configuration.html#gui-admin-page), or by modifying the project configuration file,
+[GUI Admin Page](../administration/configuration.html#gui-admin-page), 
+or by modifying the project configuration file,
 see [Resource Model Sources](plugins.html#resource-model-sources).
 
-## Command Execution
+## Jobs
 
-Rundeck supports two modes of execution: *ad-hoc commands* and *Job*.
-
-An *ad-hoc command* is any system command or shell script executed
-via the command dispatcher. Ad hoc commands can be executed via a
-command line utility named `dispatch` or run from
-the graphical console.
-
-A *Job* specifies a sequence of one or more command invocations that
+A *Job* specifies a sequence of one or more steps that
 can be run once (i.e, is temporary) or named and stored for later use.
-Stored jobs can be started via the shell tool, `run`, and
-their progress checked with `rd-queue`.
 
-### Dispatcher options
+See [Jobs](jobs.html) to learn how to execute Rundeck jobs.
 
-Dispatcher execution can be controlled by various types of options.
+### Job Workflows
 
-Execution control
+See [Job Workflows](job-workflows.html).
 
-:    Concurrency
-     is controlled by setting the "threadcount". Execution can continue even if
-     some node fails if the "keepgoing" option is set to true.
+### Job Options
 
-Node Filters
+See [Job Options](job-options.html).
 
-:    Filtering options specify include and exclude filters to
-     determine which nodes from the project resource model to distribute
-     commands to.
+## Nodes
+
+
+### Node filtering
+
+
+Filtering options specify include and exclude filters to
+determine which nodes from the project resource model to distribute
+commands to.
 
 Filter Keywords
 
@@ -414,15 +404,16 @@ case an error occurs :
 
     dispatch -p examples -I tags=web -K -C 10 -- sudo apachectl restart 
 
-Consult the [rd-options(1)](../manpages/man1/rd-options.html) manual page for the complete reference on
-available dispatcher options.
-  
+Consult the [rd-options(1)](../manpages/man1/rd-options.html) 
+manual page for the complete reference on available dispatch options.
+
+
 ### Ad-hoc commands 
 
 Typically, an ad-hoc command is a shell script or system executable
 that you run at an interactive terminal. Ad-hoc commands can be
-executed via the `dispatch` shell command or a graphical
-shell.
+executed via the `dispatch` shell command or from the Nodes page
+in the GUI.
 
 #### Shell tool command execution
 
@@ -439,17 +430,12 @@ The ``uptime`` command is queued and executed. The output can be followed by
 going to the URL returned in the output (eg, http://strongbad:4440/execution/follow/7). 
 
 Sometimes it is desirable to execute the command
-directly, and not queue it. Use the ``--noqueue`` option to execute
-and follow the output from the console.
+and follow the output from the console. Use the `-f` flag to echo the output as the command is executed by the server:
 
-    $ dispatch -I os-family=unix  --noqueue -- uptime
-    [ctier@centos54 dispatch][INFO]  10:34:54 up 46 min,  2 users,  load average: 0.00, 0.00, 0.00
+    $ dispatch -I os-family=unix -f -- uptime
+    [demo@centos54 dispatch][INFO]  10:34:54 up 46 min,  2 users,  load average: 0.00, 0.00, 0.00
     [alexh@strongbad dispatch][INFO] 10:34  up 2 days, 18:51, 2 users, load averages: 0.55 0.80 0.75
     [examples@ubuntu dispatch][INFO]  10:35:01 up 2 days, 18:40,  2 users,  load average: 0.00, 0.01, 0.00
-
-**Note**: The "--noqueue" flag is useful for testing and debugging execution
-but undermines visibility since execution is not managed through the central execution
-queue.
 
 Notice, the `dispatch` command prepends the message output
 with a header that helps understand from where the output originates. The header
@@ -459,8 +445,8 @@ occurred.
 Execute the Unix `whomi` command to see what user ID is
 used by that Node to run dispatched commands:
 
-    $ dispatch -I os-family=unix --noqueue -- whoami
-    [ctier@centos54 dispatch][INFO] ctier
+    $ dispatch -I os-family=unix -f -- whoami
+    [demo@centos54 dispatch][INFO] demo
     [alexh@strongbad dispatch][INFO] alexh
     [examples@ubuntu dispatch][INFO] examples
 
@@ -468,7 +454,9 @@ You can see that the resource model defines each Node to use a
 different login to execute `dispatch` commands.  That
 feature can be handy when Nodes serve different roles and therefore,
 use different logins to manage processes. See the
-`username` attribute in [resource-v13(5) XML](../manpages/man5/resource-v13.html) or [resource-v13(5) YAML](../manpages/man5/resource-yaml-v13.html) manual page.
+`username` attribute in 
+[resource-v13(5) XML](../manpages/man5/resource-v13.html) or 
+[resource-v13(5) YAML](../manpages/man5/resource-yaml-v13.html) manual page.
 
 The `dispatch` command can also execute shell
 scripts. Here's a trivial script that generates a bit of system info:
@@ -510,23 +498,22 @@ below (see [output](rundeck-basics.html#following-execution-output)).
 
 ![Ad hoc execution output](../figures/fig0208.png)
 
-You will also notice the ad hoc execution listed in the "Now running" 
-part of the page, located above the command prompt.
+You will also notice the ad hoc execution listed in the "Activity" 
+part of the page, located below the command output.
 All running executions are listed there. Each running execution
 is listed, showing the start time, the user running it, and a link
 to follow execution output on a separate page.
 
 ![Now running ad hoc command](../figures/fig0207-b.png)
 
-At the bottom of the page, you will see a "History" section containing
+The "Activity" section also contains
 all executions in the selected project for the last 24 hours. After the execution
-completes, a new event will be added to the history. A yellow highlight
-indicates when the command leaves the Now running section and enters
-the history table.
+completes, a new event will be added to the list. A yellow highlight
+indicates when the command completes.
 
 ![Run history](../figures/fig0207-c.png)
 
-History is organized in summary form using a table layout. The "Summary" column
+Activity is organized in summary form using a table layout. The first column
 shows the command or script executed. The "Node Failure Count" contains
 the number of nodes where an error in execution occurred. If no errors occurred,
 "ok" will be displayed. The "User" and "Time" columns show the user that executed
@@ -542,21 +529,9 @@ Tail Output
 
 :   Displays output messages from the command execution as if you were
     running the Unix `tail -f` command on the output log file. 
-    By default, only the last 20 lines of output is displayed but this
-    can be expanded or reduced by pressing the "-" or "+" buttons. You
-    can also type in an exact number into the textfield.
     ![Ad hoc execution output](../figures/fig0208.png)
 
-Annotated
-
-:   The annotated mode displays the output messages in the order they
-    are received but labels the each line with the Node from which the
-    message originated. Through its additional controls each Node
-    context can be expanded to show the output it produced, or
-    completely collapsed to hide the textual detail.    
-    ![Annotated output](../figures/fig0209.png)
-
-Compact
+By Node
 
 :   Output messages are sorted into Node specific sections and are not
     interlaced. By default, the messages are collapsed but can be
@@ -567,8 +542,8 @@ Compact
 
 Sometimes it is useful to have a page where just the execution output
 is displayed separately. One purpose is to share a link to others 
-interested in following the output messages. Click the "output >>"
-link in the "Now running" section to go to the execution follow page.
+interested in following the output messages. Click the "Show >>"
+link in the "Activity" section to go to the execution follow page.
 
 Also, notice the URL in the location bar of your browser. This URL can
 be shared to others interested in the progress of execution. The URL
@@ -585,7 +560,7 @@ After execution completes, the command will have a status:
   Failed Nodes..." in case you would like to retry the command.
 
 You can download the entire output as a text file from this
-page. Press the "Download" link to retrieve the file to your desk top.
+page. Press the "Download" link to retrieve the file to your desktop.
 
 ### Controlling command execution
 
@@ -612,10 +587,10 @@ exit with code 1.
 Commands or scripts that exit with a non-zero exit code will cause the
 dispatch to fail unless the keepgoing flag is set.
 
-    $ dispatch -I os-family=unix -s /tmp/listening.sh --noqueue
+    $ dispatch -I os-family=unix -s /tmp/listening.sh -f
     [alexh@strongbad dispatch][INFO] Connecting to centos54:22
     [alexh@strongbad dispatch][INFO] done.
-    [ctier@centos54 dispatch][INFO] not listening on 4440
+    [demo@centos54 dispatch][INFO] not listening on 4440
     error: Remote command failed with exit status 1
 
 The script failed on centos54 and caused dispatch to error out immediately.
@@ -624,11 +599,11 @@ Running the command again, but this time with the "-K" keepgoing flag
 will cause dispatch to continue and print on which nodes the script
 failed:
 
-    $ dispatch  --noqueue -K -I tags=web -s /tmp/listening.sh
+    $ dispatch -f -K -I tags=web -s /tmp/listening.sh
     [alexh@strongbad dispatch][INFO] Connecting to centos54:22
     [alexh@strongbad dispatch][INFO] done.
-    [ctier@centos54 dispatch][INFO] not listening on 4440
-    [ctier@centos54 dispatch][ERROR] Failed execution for node: centos54: Remote command failed with exit status 1
+    [demo@centos54 dispatch][INFO] not listening on 4440
+    [demo@centos54 dispatch][ERROR] Failed execution for node: centos54: Remote command failed with exit status 1
     [alexh@strongbad dispatch][INFO] listening port=4440, host=strongbad
     [alexh@strongbad dispatch][INFO] Connecting to 172.16.167.211:22
     [alexh@strongbad dispatch][INFO] done.
@@ -643,7 +618,7 @@ failed:
 
 By default, commands or scripts executed on the command line by `dispatch` are
 queued as temporary jobs in Rundeck. The `dispatch` command
-is equivalent to a "Run and Forget" action in the graphical console.
+is equivalent to a "Run and Forget".
 
 The script below is a long running check that will conduct a check periodically
 waiting a set time between each pass. The script can be run with or without
@@ -680,9 +655,8 @@ dash):
 
 ### Tracking execution
 
-Queued ad-hoc command and temporary or saved Job executions can be
-tracked from the "Run" page in the "[Now Running](rundeck-basics.html#now-running)" area at the top of
-the page.
+Queued ad-hoc command and Job executions can be
+tracked from the "Activity" page.
 
 Execution can also be tracked using the [rd-queue](../manpages/man1/rd-queue.html) shell tool.
 
@@ -743,56 +717,55 @@ Two plugin files are included with the default Rundeck installation for your use
 * [Stub plugin](plugins.html#stub-plugin): simply prints the command or script instead of running it.
 * [Script plugin](plugins.html#script-plugin): executes an external script file to perform the command, useful for developing your own plugin with the [Script Plugin Development](../developer/plugin-development.html#script-plugin-development) model.
 
-## History
+## Activity
 
-History for queued ad-hoc commands, as well as, temporary and
-saved Job executions  is stored by the Rundeck server. History data
-can be filtered and viewed inside the "History" page.
+History for queued ad-hoc commands, as well as, 
+Job executions  is stored by the Rundeck server. History data
+can be filtered and viewed inside the "Activity" page.
 
-![History page](../figures/fig0211.png)
+![Activity page](../figures/fig0211.png)
 
-### Filtering event history
+### Filtering Activity
 
-By default, the History page will list history for the last day's
-executions. The page contains a filter control that can be used to
+By default, the Activity page will list running executions and history 
+recent executions. The page contains a filter control that can be used to
 expand or limit the executions.
 
 The filter form contains a number of fields to limit search:
 
 * Within: Time range. Choices include 1 day, 1 week, 1 month or other
   (given a start after/before to ended after/before).
-* Name: Job title name.
-* Project: Project name. This may be set if the project menu was used.
+* Job Name: Job title name.
 * User: User initiating action.
-* Summary: Message text.
+* Ad hoc command: Command typed into the command bar or via `dispatch`.
 * Result: Success or failure status.
 
 ![History filter form](../figures/fig0212.png)
 
 After filling the form pressing the "Filter" button, the page will
-display events matching the search.
+display executions matching the search.
 
 Filters can be saved to a menu that makes repeating searches more
 convenient. Click the "save this filter..." link to save the filter
 configuration.
 
-### Event view
+### Execution listings
 
-History for each execution contains the command(s) executed,
-dispatcher options, success status and a link to a file containing all
+Information for each execution contains the command or Job executed,
+options, success status and a link to a file containing all
 the output messages.
 
-![Event view](../figures/fig0213.png)
+![Execution view](../figures/fig0213.png)
 
 If any errors occurred, the "Node Failure Count" column will show
 the number of nodes in red text. A bar chart indicates the percent
 failed.
 
-![Event view](../figures/fig0216.png)
+![Execution view](../figures/fig0216.png)
 
 ### RSS link
 
-An RSS icon provides a link to an RSS view of the events that match
+If configured, an RSS icon provides a link to an RSS view of the events that match
 the current filtering criteria.
 
 ![RSS link](../figures/fig0214.png)
@@ -824,4 +797,4 @@ At this point, you can do basic Rundeck operations - setup a project,
 define and query the project resource model, execute ad-hoc
 commands, run and save Jobs and view history.
 
-Next, we'll cover one of Rundeck's core features: Jobs.
+Next, we'll cover Rundeck's core feature: Jobs.

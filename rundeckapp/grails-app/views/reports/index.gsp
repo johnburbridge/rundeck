@@ -6,7 +6,9 @@
     <g:ifServletContextAttribute attribute="RSS_ENABLED" value="true">
     <link rel="alternate" type="application/rss+xml" title="RSS 2.0" href="${createLink(controller:"feed",action:"index",params:paginateParams?paginateParams:[:])}"/>
     </g:ifServletContextAttribute>
-    <title><g:message code="gui.menu.Events"/></title>
+    <title><g:message code="gui.menu.Events"/> - ${session.project.encodeAsHTML()}</title>
+    <g:javascript library="yellowfade"/>
+    <g:javascript library="pagehistory"/>
     <g:javascript>
                 
 
@@ -29,56 +31,143 @@
                 $("loaderror").show();
             }
         }
+
         var bfilters=${filterPref.encodeAsJSON()};
         <g:set var="pageparams" value="${[offset:params.offset,max:params.max]}"/>
         <g:set var="eventsparams" value="${paginateParams}"/>
         var eventsparams=${eventsparams.encodeAsJSON()};
         var pageparams=${pageparams.encodeAsJSON()};
+        var autoLoad=${params.refresh == 'true' ? true : false};
         var links = {
-            events:'${createLink(controller:"reports",action:"eventsFragment")}'
+            events:'${createLink(controller: "reports", action: "eventsFragment")}',
+            nowrunning:'${createLink(controller: "menu", action: "nowrunningFragment")}',
+            baseUrl:"${createLink(controller: "reports", action: "index")}"
         };
-        var boxctl ;
+        var runupdate;
+        function loadNowRunning(){
+            runupdate=new Ajax.PeriodicalUpdater({ success:'nowrunning'},links.nowrunning,{
+                evalScripts:true,
+                parameters:eventsparams,
+                frequency:5,
+                onFailure:function (response) {
+                    showError("AJAX error: Now Running [" + runupdate.url + "]: " + response.status + " "
+                                      + response.statusText);
+                    runupdate.stop();
+                }
+            });
+        }
+        /** START history
+         *
+         */
+        var histControl = new HistoryControl('histcontent',{xcompact:true,nofilters:true});
+        function loadHistory(){
+            histControl.loadHistory( eventsparams );
+        }
+        function setAutoLoad(auto){
+            autoLoad=auto;
+
+            $$('input.autorefresh').each(function(e){
+                e.checked=auto;
+            });
+        }
         function _pageInit() {
             try{
-            boxctl = new WBoxController({views:{db2:'evtsholder'},key:'nowrunning'});
-            //eventsparams.filterName=bfilters['events'];
-            if(pageparams && pageparams.offset){
-                Object.extend(eventsparams,pageparams);
-            }
-            boxctl.addBox('db2', new WBox('box2', {noTitle:true,noTabs:true,tabs:[
-                {   name:'events',
-                    url:links['events'],
-                    notitle:true,
-                    params:eventsparams
-                },
-            ]}));
-            boxctl._pageInit();
+                if(pageparams && pageparams.offset){
+                    Object.extend(eventsparams,pageparams);
+                }
             }catch(e){
                 console.log("error: "+e);
             }
+            loadNowRunning();
+            $$('input.autorefresh').each(function(e){
+                var changeHandler=function(evt){
+                    Object.extend(eventsparams,{refresh:e.checked});
+                    autoLoad=e.checked;
+                    url=_genUrl(links.baseUrl,eventsparams);
+                    if(typeof(history.pushState)=='function'){
+                        history.pushState(eventsparams, pageTitle, url);
+                    }else{
+                        document.location=url;
+                    }
+                    if(autoLoad){
+                        loadHistory();
+                        $('eventsCountBadge').hide();
+                    }else{
+                        _scheduleSinceCheck();
+                    }
+                };
+                Event.observe(e,'change',  changeHandler);
+                if(Prototype.Browser.IE
+                    && $(e).tagName.toLowerCase()=='input'
+                    && ($(e).type.toLowerCase()=='radio' ||$(e).type.toLowerCase()=='checkbox')){
+                    Event.observe(e,'click',  changeHandler);
+                }
+
+            });
         }
 
+        var lastRunExec = 0;
+        var lastRunTime = 0;
         var checkUpdatedUrl='';
+        var pageTitle="${g.message(code: 'gui.menu.Events').encodeAsJavaScript()} - ${session?.project.encodeAsJavaScript()}";
+        var firstLoad=true;
+        var firstparams=Object.extend({refresh:${params.refresh == 'true' ? true : false}},eventsparams);
+        window.onpopstate = function(event) {
+            if(firstLoad){
+                firstLoad=false;
+            }else if(event.state){
+                Object.extend(eventsparams,event.state);
+                setAutoLoad(event.state.refresh);
+                loadHistory();
+            }else {
+                eventsparams=firstparams;
+                setAutoLoad(eventsparams.refresh);
+                loadHistory();
+            }
+        };
         function _updateBoxInfo(name, data) {
-            if(boxctl){
-                try{
-                    if(data.url && data.url.indexOf("?")>0){
-                        //remove params
-                        data.params={};
-                    }
-                boxctl.updateDataForTab(name, data);
-                }catch(e){
-
+            if(name==='events' && data.total){
+                $$('._obs_histtotal').each(function(e){
+                    $(e).innerHTML=data.total;
+                });
+            }
+            if(name=='events' && data.checkUpdatedUrl ){
+                checkUpdatedUrl=data.checkUpdatedUrl;
+                if(!autoLoad){
+                    _updateEventsCount(0);
+                    _scheduleSinceCheck();
                 }
             }
-            if(name=='events' && data.checkUpdatedUrl){
-                checkUpdatedUrl=data.checkUpdatedUrl;
-                _updateEventsCount(0);
-                _scheduleSinceCheck();
+            if(name==='events' && data.lastDate){
+                histControl.setHiliteSince(data.lastDate);
             }
             if(name=='events' && data.rssUrl && $('rsslink')){
                 $('rsslink').href=data.rssUrl;
                 $$('link[rel="alternate"]').each(function(elem){$(elem).href=data.rssUrl});
+            }
+            if(name=='events' && data.total){
+                var e = $('evtsholder').down('.paginate');
+                if(e){
+                    var pagefunc=function(e,params){
+                        Object.extend(eventsparams,params);
+                        loadHistory();
+                        history.pushState(params, pageTitle, e.href);
+                    };
+                    paginate(e,data.offset,data.total,data.max,{
+                        baseUrl:links.baseUrl,
+                        'paginate.prev':"${g.message(code: 'default.paginate.prev',default:'Previous')}",
+                        'paginate.next':"${g.message(code: 'default.paginate.next',default:'Next')}",
+                        prevBehavior:pagefunc,
+                        stepBehavior:pagefunc,
+                        nextBehavior:pagefunc
+                    });
+                }
+            }
+            if (name == 'nowrunning' && data.lastExecId && data.lastExecId != lastRunExec) {
+                lastRunExec = data.lastExecId;
+                if(autoLoad){
+                    loadHistory();
+                }
             }
         }
         var sincechecktimer=null;
@@ -109,22 +198,22 @@
             }else {
                 showError(data.error && data.error.message? data.error.message : 'Invalid data response');
             }
-            _scheduleSinceCheck();
+            if(!autoLoad){
+                _scheduleSinceCheck();
+            }else{
+                $('eventsCountBadge').hide();
+            }
         }
 
         function _setFilterSuccess(response,name){
             var data=eval("("+response.responseText+")"); // evaluate the JSON;
             if(data){
                 var bfilters=data['filterpref'];
-                boxctl.updateDataForTab(name,{params:{filterName:bfilters[name]}});
+                eventsparams={filterName:bfilters[name]};
+                pageparams={filterName:bfilters[name]};
+                loadHistory();
                 //reload page
-                //document.location="${createLink(controller:'reports',action:'index')}"+(bfilters[name]?"?filterName="+bfilters[name]:'');
-                try{
-                    boxctl.reloadTabForName(name);
-                }catch(e){
-                    console.log("error: "+e);
-                }
-
+//                document.location="${createLink(controller:'reports',action:'index')}"+(bfilters[name]?"?filterName="+bfilters[name]:'');
             }
         }
 
@@ -183,15 +272,11 @@
 <div>
 
 
-<div class="pageBody solo">
-    <g:ifServletContextAttribute attribute="RSS_ENABLED" value="true">
-    <a title="RSS 2.0" class="floatr" href="${createLink(controller:"feed",action:"index",params:paginateParams)}" id="rsslink"><img src="${resource(dir:'images',file:'feed.png')}" width="14px" height="14px" alt=""/> RSS</a>
-    </g:ifServletContextAttribute>
+<div class="pageBody">
     <g:render template="/common/messages"/>
 
-    <span class="badgeholder"  id="eventsCountBadge" style="display:none"><span class="badge newcontent active" id="eventsCountContent" onclick="boxctl.reloadTabForName('events');" title="click to load new events"></span></span>
-    <div id="evtsholder">
-    <g:render template="eventsFragment" model="${[paginateParams:paginateParams,params:params,reports:reports,filterName:filterName]}"/>
+    <div id="evtsholder" class="eventspage">
+    <g:render template="eventsFragment" model="${[paginateParams:paginateParams,params:params,includeBadge:true,includeAutoRefresh:true,reports:reports,filterName:filterName, filtersOpen: true, includeNowRunning:true]}"/>
     </div>
 
     </div>

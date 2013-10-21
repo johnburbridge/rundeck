@@ -10,10 +10,10 @@
     <g:render template="/common/messages"/>
     <div class="allnodes">
 </g:if>
-    <div class="presentation clear">
+    <div class="clear">
     <g:render template="${views[params.view]?views[params.view]:views['']}" model="${[nodes:allnodes,totalexecs:totalexecs,jobs:jobs,params:params,total:total,allcount:allcount,page:page,max:max,nodeauthrun:nodeauthrun,tagsummary:tagsummary]}"/>
     </div>
 <g:if test="${!params.view || params.view!='tableContent'}">
     </div>
-    <g:render template="/common/boxinfo" model="${[name:'nodes',model:[title:'Nodes',total:total,linkUrl:createLink(controller:'framework',action:'nodes')]]}"/>
+    <g:render template="/common/boxinfo" model="${[name:'nodes',model:[title:'Nodes',total:total,allcount:allcount,linkUrl:createLink(controller:'framework',action:'nodes')]]}"/>
 </g:if>

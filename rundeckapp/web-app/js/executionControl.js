@@ -26,6 +26,9 @@ var FollowControl = Class.create({
     collapseCtx: {value:true,changed:false},
     showFinalLine: {value:true,changed:false},
     groupOutput: {value: true},
+    colTime:{value:true},
+    colNode:{value:true},
+    colStep:{value:true},
 
     lastrow:null,
     contextIdCounter: 0,
@@ -54,9 +57,11 @@ var FollowControl = Class.create({
     browsemode:false,
     tailmode:false,
     refresh:false,
+    truncateToTail:false,
     lastlines:20,
     maxLastLines: 100,
     iconUrl:'/images/icon',
+    smallIconUrl:'/images/icon-small',
     appLinks:{},
     
     initialize: function(eid,elem,params){
@@ -87,10 +92,26 @@ var FollowControl = Class.create({
     bindActions: function(elem){
         var obj=this;
         $(elem).select('a.out_setmode_tail').each(function(e){
-            Event.observe(e,'click',function(evt){Event.stop(evt);obj.setMode('tail');obj.reload();});
+            Event.observe(e,'click',function(evt){Event.stop(evt);
+                if(!obj.nodemode){
+                    obj.setMode('tail');
+                    obj.setGroupOutput(false);
+                }else{
+                    obj.setMode('tail');
+                    obj.reload();
+                }
+            });
         });
         $(elem).select('a.out_setmode_browse').each(function(e){
-            Event.observe(e,'click',function(evt){Event.stop(evt);obj.setMode('browse');obj.reload();});
+            Event.observe(e,'click',function(evt){Event.stop(evt);
+                if (!obj.nodemode) {
+                    obj.setMode('browse');
+                    obj.setGroupOutput(true);
+                } else {
+                    obj.setMode('browse');
+                    obj.reload();
+                }
+            });
         });
         $(elem).select('a.out_setmode_node').each(function(e){
             Event.observe(e,'click',function(evt){Event.stop(evt);obj.setMode('node');obj.reload();});
@@ -102,6 +123,24 @@ var FollowControl = Class.create({
         $(elem).select('.opt_append_top_false').each(function(e){
             e.onclick=null;
             Event.observe(e,'click',function(evt){obj.setOutputAppendTop(false);});
+        });
+        $(elem).select('.opt_display_col_time').each(function (e) {
+            e.onclick = null;
+            Event.observe(e, 'click', function (evt) {
+                obj.setColTime(e.checked);
+            });
+        });
+        $(elem).select('.opt_display_col_node').each(function (e) {
+            e.onclick = null;
+            Event.observe(e, 'click', function (evt) {
+                obj.setColNode(e.checked);
+            });
+        });
+        $(elem).select('.opt_display_col_step').each(function (e) {
+            e.onclick = null;
+            Event.observe(e, 'click', function (evt) {
+                obj.setColStep(e.checked);
+            });
         });
         $(elem).select('.opt_auto_scroll_true').each(function(e){
             e.onclick=null;
@@ -172,6 +211,8 @@ var FollowControl = Class.create({
         var obj=this;
         this.setGroupOutput(this.browsemode||this.nodemode);
         if(this.targetElement && $(this.targetElement)){
+            $(this.targetElement).select('.obs_node_false').each(!this.nodemode?Element.show:Element.hide);
+            $(this.targetElement).select('.obs_node_true').each(this.nodemode?Element.show:Element.hide);
             $(this.targetElement).select('.opt_mode').each(Element.hide);
             $(this.targetElement).select('.out_setmode').each(function(e){e.removeClassName('selected')});
             if(this.tailmode){
@@ -301,14 +342,14 @@ var FollowControl = Class.create({
         if (this.collapseCtx.value) {
             this.ctxBodySet._each(Element.hide);
             this.ctxBodyFinalSet._each(this.showFinalLine.value ? Element.show : Element.hide);
-            $$('.expandicon').each(function(e) {
+            $$('.expandicon,tr.contextRow').each(function(e) {
                 e.addClassName('closed');
                 e.removeClassName('opened');
             });
         } else {
             this.ctxBodySet._each(Element.show);
             this.ctxBodyFinalSet._each(Element.show);
-            $$('.expandicon').each(function(e) {
+            $$('.expandicon,tr.contextRow').each(function(e) {
                 e.removeClassName('closed');
                 e.addClassName('opened');
             });
@@ -346,6 +387,11 @@ var FollowControl = Class.create({
         }
 
         if (!this.groupOutput.value) {
+            if ($(this.cmdoutputtbl)) {
+                this.setColTime(this.colTime.value);
+                this.setColNode(this.colNode.value);
+                this.setColStep(this.colStep.value);
+            }
             if ($('ctxcollapseLabel')) {
                 $('ctxcollapseLabel').hide();
             }
@@ -354,11 +400,18 @@ var FollowControl = Class.create({
             }
 
         } else {
+            if ($(this.cmdoutputtbl)) {
+                $(this.cmdoutputtbl).removeClassName('collapse_time');
+                $(this.cmdoutputtbl).addClassName('collapse_node');
+                $(this.cmdoutputtbl).addClassName('collapse_stepnum');
+            }
             if ($('ctxcollapseLabel')) {
                 $('ctxcollapseLabel').show();
             }
             this.setCtxCollapseDisplay(this.collapseCtx.value);
         }
+        $$('.obs_grouped_true').each(val?Element.show:Element.hide);
+        $$('.obs_grouped_false').each(!val ? Element.show : Element.hide);
         if ($('ctxshowgroupoption')) {
             if (val) {
                 $('ctxshowgroupoption').addClassName('selected');
@@ -388,6 +441,44 @@ var FollowControl = Class.create({
                 $('ctxshowlastlineoption').removeClassName('selected');
             }
         }
+    },
+    setColTime: function (show) {
+        if ($(cmdoutputtbl)) {
+
+            if (show) {
+                $(cmdoutputtbl).removeClassName('collapse_time');
+            } else {
+                $(cmdoutputtbl).addClassName('collapse_time');
+            }
+        }
+
+        this.colTime.value = show;
+    },
+    setColNode: function (show) {
+
+        if ($(cmdoutputtbl)) {
+
+            if (show) {
+                $(cmdoutputtbl).removeClassName('collapse_node');
+            } else {
+                $(cmdoutputtbl).addClassName('collapse_node');
+            }
+        }
+
+        this.colNode.value = show;
+    },
+    setColStep: function (show) {
+
+        if ($(cmdoutputtbl)) {
+
+            if (show) {
+                $(cmdoutputtbl).removeClassName('collapse_stepnum');
+            } else {
+                $(cmdoutputtbl).addClassName('collapse_stepnum');
+            }
+        }
+
+        this.colStep.value = show;
     },
     setOutputAppendTop: function(istop) {
         if (this.appendtop.value != istop) {
@@ -433,18 +524,11 @@ var FollowControl = Class.create({
         tbl.setAttribute("cellPadding", "0");
         tbl.addClassName('execoutput');
         tbl.setAttribute('id', 'cmdoutputtbl');
-        var th = tbl.createTHead();
-        var thr1 = th.insertRow(-1);
-        var thi = new Element("th");
-        thi.setAttribute("width", "20px");
-        thr1.appendChild(thi);
-        var th1 = new Element("th");
-        th1.innerHTML = "Time";
-        thr1.appendChild(th1);
-        var th2 = new Element("th");
-        th2.innerHTML = "Message";
-        th2.setAttribute('colspan', '2');
-        thr1.appendChild(th2);
+        if(!this.tailmode){
+            $(tbl).addClassName('collapse_node');
+            $(tbl).addClassName('collapse_stepnum');
+        }
+
         var tbod = new Element("tbody");
         tbl.appendChild(tbod);
 
@@ -453,19 +537,34 @@ var FollowControl = Class.create({
         $('commandPerform').show();
         return tbl;
     },
+    showLoading:function(message){
+        if ($('fileload')) {
+            $('fileload').show();
+            if (message != null) {
+                $('fileloadpercent').innerHTML = message;
+            }
+        }
+        if ($('fileload2')) {
+            $('fileload2').show();
+            if (message != null) {
+                $('fileload2percent').innerHTML = message;
+            }
+        }
+    },
+    hideLoading:function(){
+        if ($('fileload')) {
+            $('fileload').hide();
+        }
+        if ($('fileload2')) {
+            $('fileload2').hide();
+        }
+    },
     appendCmdOutput: function(data) {
         var orig = data;
         var needsScroll = false;
         try{
         if (!this.isAppendTop() && this.isAtBottom()) {
             needsScroll = true;
-        }
-        if (this.refresh && this.cmdoutputtbl) {
-            try {
-                this.clearTable(this.cmdoutputtbl);
-            } catch(e) {
-                this._log(e);
-            }
         }
         if (typeof(data) == "string" && data == "") {
             return;
@@ -478,8 +577,18 @@ var FollowControl = Class.create({
             if (typeof(data) == "string") {
                 eval("data=" + data);
             }
+            if (this.refresh && this.cmdoutputtbl && data.lastlinesSupported && this.truncateToTail){
+                try {
+                    this.clearTable(this.cmdoutputtbl);
+                } catch (e) {
+                    this._log(e);
+                }
+            }
             if (!this.cmdoutputtbl) {
                 this.cmdoutputtbl = this.createTable();
+                this.setColNode(this.colNode.value);
+                this.setColStep(this.colStep.value);
+                this.setColTime(this.colTime.value);
             }
             if (!this.runningcmd) {
                 this.runningcmd = new Object();
@@ -491,8 +600,13 @@ var FollowControl = Class.create({
             return;
         }
         if (data.error) {
-            this.appendCmdOutputError("data error "+data.error);
+            this.appendCmdOutputError(data.error);
             this.finishedExecution();
+            if(this.runningcmd.count==0){
+                //hide table header
+                $(this.cmdoutputtbl).hide();
+            }
+            $('viewoptionscomplete').hide();
             return;
         }
 
@@ -503,18 +617,29 @@ var FollowControl = Class.create({
         this.runningcmd.jobstatus = data.execState;
         this.runningcmd.failednodes = data.hasFailedNodes;
         this.runningcmd.percent = data.percentLoaded;
+        this.runningcmd.pending = data.pending;
 
         var entries = $A(data.entries);
-        if (null != data.duration) {
-            this.updateDuration(data.duration);
+        if (null != data.execDuration) {
+            this.updateDuration(data.execDuration);
         }
+        //if tail mode, count number of rows
+        var rowcount= this.countTableRows(this.cmdoutputtbl);
         if (entries != null && entries.length > 0) {
-
+            var tr;
             for (var i = 0 ; i < entries.length ; i++) {
                 var e = entries[i];
-                this.runningcmd.entries.push(e);
-                this.genDataRow(e, this.cmdoutputtbl);
-
+                //this.runningcmd.entries.push(e);
+                tr=this.genDataRow(e, this.cmdoutputtbl);
+                //if tail mode and count>last lines, remove 1 row from top
+                rowcount++;
+            }
+            if (this.refresh && rowcount > this.lastlines && !data.lastlinesSupported && this.truncateToTail) {
+                //remove extra lines
+                this.removeTableRows(this.cmdoutputtbl, rowcount- this.lastlines);
+            }
+            if(needsScroll && !this.runningcmd.jobcompleted){
+                this.scrollToBottom();
             }
         }
 
@@ -536,22 +661,32 @@ var FollowControl = Class.create({
             return;
         } else {
             var obj=this;
+            var time= (this.tailmode && this.taildelay > 0) ? this.taildelay * 1000 : 50;
+            if(this.runningcmd.pending != null){
+                time= (this.tailmode && this.taildelay > 0) ? this.taildelay * 5000 : 5000
+            }
             setTimeout(function() {
                 obj.loadMoreOutput(obj.runningcmd.id, obj.runningcmd.offset);
-            }, (this.tailmode && this.taildelay > 0) ? this.taildelay * 1000 : 50);
+            }, time);
         }
         if (this.runningcmd.jobcompleted && !this.runningcmd.completed) {
             this.jobFinishStatus(this.runningcmd.jobstatus);
             if ($('progressContainer')) {
                 $('progressContainer').hide();
             }
-            if ($('fileload')) {
-                $('fileload').show();
-                $('fileloadpercent').innerHTML = Math.ceil(this.runningcmd.percent) + "%";
+            var message=null
+            if(this.runningcmd.percent!=null){
+                message= "Loading Output... "+Math.ceil(this.runningcmd.percent) + "%";
+            } else if (this.runningcmd.pending != null) {
+                message = this.runningcmd.pending;
             }
-            if ($('fileload2')) {
-                $('fileload2').show();
-                $('fileload2percent').innerHTML = Math.ceil(this.runningcmd.percent) + "%";
+            this.showLoading(message);
+        }else if (!this.runningcmd.jobcompleted && !this.runningcmd.completed) {
+            //pending a remote load
+            if (this.runningcmd.pending != null) {
+                this.showLoading(this.runningcmd.pending);
+            }else {
+                this.hideLoading();
             }
         }
         if (this.runningcmd.jobcompleted) {
@@ -588,14 +723,16 @@ var FollowControl = Class.create({
                 this.ctxBodyFinalSet.push(temptbod);
                 if (0 == this.lastTBody.rows.length) {
                     var expicon = $('ctxExp' + this.contextIdCounter);
-                    if (expicon) {
-                        expicon.removeClassName('expandicon');
-                    }
+//                    if (expicon) {
+//                        expicon.removeClassName('expandicon');
+//                    }
                     var ctxgrp = $('ctxgroup' + this.contextIdCounter);
 
                     if (ctxgrp && ctxgrp.rows.length > 0) {
-                        $(ctxgrp.rows[0]).removeClassName('expandable');
-                        $(ctxgrp.rows[0]).removeClassName('action');
+//                        $(ctxgrp.rows[0]).removeClassName('expandable');
+//                        $(ctxgrp.rows[0]).removeClassName('action');
+                        $(ctxgrp.rows[0]).addClassName('expandable');
+                        $(ctxgrp.rows[0]).addClassName('action');
                     }
                 } else {
 
@@ -614,18 +751,18 @@ var FollowControl = Class.create({
             var ctxid = this.ctxBodySet.length - 1;
             if (null != $('ctxIcon' + (ctxid))) {
                 var status = this.contextStatus[(ctxid) + ""];
-                var iconname = "-small-ok.png";
                 if (typeof(status) != "undefined") {
-                    iconname = "-small-" + status + ".png";
+                    var iconname = "-ok.png";
+                    iconname = "-" + status + ".png";
+                    var img = new Element('img');
+                    img.setAttribute('alt', '');
+                    //                 img.setAttribute('title',status);
+                    img.setAttribute('width', '16');
+                    img.setAttribute('height', '16');
+                    img.setAttribute('src', this.smallIconUrl + iconname);
+                    img.setAttribute('style', 'vertical-align:center');
+                    $('ctxIcon' + (ctxid)).appendChild(img);
                 }
-                var img = new Element('img');
-                img.setAttribute('alt', '');
-                //                 img.setAttribute('title',status);
-                img.setAttribute('width', '16');
-                img.setAttribute('height', '16');
-                img.setAttribute('src', this.iconUrl + iconname);
-                img.setAttribute('style', 'vertical-align:center');
-                $('ctxIcon' + (ctxid)).appendChild(img);
             }
 
         } catch(e) {
@@ -637,6 +774,8 @@ var FollowControl = Class.create({
             $('databody' + ctxid).hide();
             $('ctxExp' + ctxid).removeClassName('opened');
             $('ctxExp' + ctxid).addClassName('closed');
+            $('ctxExp' + ctxid).up('tr.contextRow').removeClassName('opened');
+            $('ctxExp' + ctxid).up('tr.contextRow').addClassName('closed');
             if ($('finaldatabody' + ctxid)) {
                 if (this.collapseCtx.value && this.showFinalLine.value) {
                     $('finaldatabody' + ctxid).show();
@@ -648,6 +787,8 @@ var FollowControl = Class.create({
             $('databody' + ctxid).show();
             $('ctxExp' + ctxid).removeClassName('closed');
             $('ctxExp' + ctxid).addClassName('opened');
+            $('ctxExp' + ctxid).up('tr.contextRow').removeClassName('closed');
+            $('ctxExp' + ctxid).up('tr.contextRow').addClassName('opened');
             if ($('finaldatabody' + ctxid)) {
                 $('finaldatabody' + ctxid).show();
             }
@@ -665,7 +806,7 @@ var FollowControl = Class.create({
         var obj=this;
         if(this.isrunning){
             new Ajax.Request(url, {
-                parameters: "id=" + id + "&offset=" + offset + ((this.tailmode && this.lastlines) ? "&lastlines=" + this.lastlines : "")
+                parameters: "id=" + id + "&offset=" + offset + ((this.tailmode && this.lastlines && this.truncateToTail) ? "&lastlines=" + this.lastlines : "")
                     + this.extraParams ,
                 onSuccess: function(transport) {
                     obj.appendCmdOutput(transport.responseText);
@@ -684,6 +825,40 @@ var FollowControl = Class.create({
                 cb();
             }
         }
+    },
+    countTableRows: function(tbl){
+        var count=0;
+        //count rows for every table body
+        for (var j = 0; j < tbl.tBodies.length; j++) {
+            for (var k = 0; k < tbl.tBodies[j].rows.length ; k++) {
+                if (!$(tbl.tBodies[j].rows[0]).hasClassName('contextRow')) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    },
+    removeTableRows: function(tbl,x){
+        var count=x;
+        //count rows for every table body
+        for (var j = 0; j < tbl.tBodies.length && count>0; j++) {
+            console.log("tbody " + j + ", original length: " + tbl.tBodies[j].rows.length);
+            for(var k=0;k<tbl.tBodies[j].rows.length && count>0;k++){
+                var row= tbl.tBodies[j].rows[k];
+                if(!$(row).hasClassName('contextRow')){
+                    tbl.tBodies[j].removeChild(row);
+                    count--;
+                    k--;
+                }
+            }
+            console.log("tbody " + j + ", new length: " + tbl.tBodies[j].rows.length);
+
+            if (tbl.tBodies[j].rows.length == 1 && $(tbl.tBodies[j].rows[0]).hasClassName('contextRow')) {
+                tbl.removeChild(tbl.tBodies[j]);
+                j--;
+            }
+        }
+        console.log("removeTableRows, final count: "+count);
     },
     reverseOutputTable: function(tbl) {
         try {
@@ -730,7 +905,11 @@ var FollowControl = Class.create({
         var a = document.documentElement.scrollHeight || document.body.scrollHeight;
         var b = document.documentElement.scrollTop || document.body.scrollTop;
         var c = document.documentElement.clientHeight || document.body.clientHeight;
-        return ((a - b) <= c);
+        return ((a - b) <= (c*1.1));
+    },
+    scrollToBottom: function()
+    {
+        window.scrollTo(0, document.documentElement.scrollHeight || document.body.scrollHeight);
     },
     genDataRowNodes: function(data, tbl) {
         this.reverseOutputTable(tbl);
@@ -758,6 +937,71 @@ var FollowControl = Class.create({
         this.lastrow = data;
         return tr;
     },
+    parseOldContextString: function(context){
+        if(context==null){
+            return null;
+        }
+        //split context into project,type,object
+        var t = context.split(':');
+        var i=0;
+        var vals= new Array();
+        for(i=0;i< t.length;i++){
+            var x = t[i];
+            var p= x.split('-',2)
+            if(p.length>0){
+                vals.push(p[0])
+            }
+        }
+        return vals;
+    },
+    escapeHtml: function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    },
+    renderContextStepNumber: function(data){
+        var ctx = this.parseOldContextString(data['command']);
+        var string;
+        if (ctx && ctx[0]) {
+             string= "Step " + ctx[0];
+            if (ctx.length > 1) {
+                string += "/" + ctx.slice(1).join("/")
+            }
+        }else{
+            string=data['command'];
+        }
+        return string;
+    },
+    renderContextString: function(data){
+        var ctx = this.parseOldContextString(data['command']);
+        if (ctx) {
+            var string="";
+            if(typeof(workflow)!='undefined'){
+                var step=workflow[parseInt(ctx[0])-1];
+                if(typeof(step)!='undefined'){
+                    if(step['exec']){
+                        string+=' $ '+step['exec'];
+                    }else if(step['jobref']){
+                        string+=" Job Reference: "+(step['jobref']['group']? step['jobref']['group']+'/':'')+step['jobref']['name'];
+                    }else if(step['script']){
+                        string += " Inline Script" ;
+                    }else if(step['scriptfile']){
+                        string += " "+step['scriptfile'] ;
+                    }else if(step['type']){//plugin
+                        string += " Plugin "+step['type'] ;
+                    }
+                }
+            }
+            if(ctx.length>1){
+                string += " > Step "+ctx.slice(1).join(" > Step ")
+            }
+            return string;
+        }
+        return data['command'];
+    },
     createNewNodeTbody: function(data, tbl, ctxid) {
         //create new Table body
         var newtbod = new Element("tbody");
@@ -779,24 +1023,24 @@ var FollowControl = Class.create({
         } else {
             tr.addClassName("down");
         }
+        $(tr).addClassName('expandable');
+        $(tr).addClassName('action');
         iconcell.addClassName("icon");
         var cell = $(tr.insertCell(1));
         cell.setAttribute('colSpan', '2');
 
 
         if (null != data['node'] && '' != data['node']) {
-            cell.innerHTML +=
-            "<span class='node'>" + "<img src='" + AppImages.iconSmallNodeObject + "' width='16' height='16' alt=''/> "
-                + data['node'] + "</span>";
+            cell.innerHTML += "<span class='node'>" + data['node'] + "</span>";
         }
 
-        if (data['command'] || data['module'] || data['context']) {
-            if (data['module'] || data['command'] && "run" != data['command']) {
-                cell.innerHTML +=
-                "<span class='cmdname' title='" + data['command'] + "'>" + data['command'] + "</span>";
+        if (data['command']  || data['context']) {
+            if ( data['command'] && "run" != data['command']) {
+                var contextstr= this.renderContextString(data)
+//                cell.innerHTML += "<span class='stepident' title='" + this.escapeHtml(contextstr) + "'>" + this.escapeHtml(contextstr) + "</span>";
             } else if (data['command'] && "run" == data['command']) {
                 cell.innerHTML +=
-                "<span class='cmdname' title='" + data['command'] + "'>" + data['command'] + "</span>";
+                "<span class='stepident' title='" + data['command'] + "'>" + data['command'] + "</span>";
             }
             if (data['context']) {
                 //split context into project,type,object
@@ -835,6 +1079,7 @@ var FollowControl = Class.create({
         //start all data tbody as closed
         Element.hide($(datatbod));
         cell2.addClassName('closed');
+        tr.addClassName('closed');
 
         return datatbod;
     },
@@ -860,14 +1105,14 @@ var FollowControl = Class.create({
             }
             if (0 == this.lastTBody.rows.length) {
                 var expicon = $('ctxExp' + this.contextIdCounter);
-                if (expicon) {
-                    expicon.removeClassName('expandicon');
-                }
+//                if (expicon) {
+//                    expicon.removeClassName('expandicon');
+//                }
                 var ctxgrp = $('ctxgroup' + this.contextIdCounter);
 
                 if (ctxgrp && ctxgrp.rows.length > 0) {
-                    $(ctxgrp.rows[0]).removeClassName('expandable');
-                    $(ctxgrp.rows[0]).removeClassName('action');
+                    $(ctxgrp.rows[0]).addClassName('expandable');
+                    $(ctxgrp.rows[0]).addClassName('action');
                 }
             } else {
 
@@ -884,18 +1129,18 @@ var FollowControl = Class.create({
 
         if (null != $('ctxIcon' + (ctxid))) {
             var status = this.contextStatus[(ctxid) + ""];
-            var iconname = "-small-ok.png";
+            var iconname = "-ok.png";
             if (typeof(status) != "undefined") {
-                iconname = "-small-" + status + ".png";
+                iconname = "-" + status + ".png";
+                var img = new Element('img');
+                img.setAttribute('alt', '');
+                //                 img.setAttribute('title',status);
+                img.setAttribute('width', '16');
+                img.setAttribute('height', '16');
+                img.setAttribute('src', this.smallIconUrl + iconname);
+                img.setAttribute('style', 'vertical-align:center');
+                $('ctxIcon' + (ctxid)).appendChild(img);
             }
-            var img = new Element('img');
-            img.setAttribute('alt', '');
-            //                 img.setAttribute('title',status);
-            img.setAttribute('width', '16');
-            img.setAttribute('height', '16');
-            img.setAttribute('src', this.iconUrl + iconname);
-            img.setAttribute('style', 'vertical-align:center');
-            $('ctxIcon' + (ctxid)).appendChild(img);
         }
         this.contextIdCounter++;
     },
@@ -927,22 +1172,21 @@ var FollowControl = Class.create({
         iconcell.addClassName("icon");
         var cell = $(tr.insertCell(1));
         cell.setAttribute('colSpan', '2');
-        //         cell.colSpan=2;
 
 
         if (null != data['node'] && '' != data['node']) {
-            cell.innerHTML +=
-            "<span class='node'>" + "<img src='" + AppImages.iconSmallNodeObject + "' width='16' height='16' alt=''/> "
-                + data['node'] + "</span>";
+            cell.innerHTML += "<span class='node'>" + data['node'] + "</span>";
         }
 
-        if (data['command'] || data['module'] || data['context']) {
-            if (data['module'] || data['command'] && "run" != data['command']) {
-                cell.innerHTML +=
-                "<span class='cmdname' title='" + data['command'] + "'>" + data['command'] + "</span>";
+        if (data['command']  || data['context']) {
+            if ( data['command'] && "run" != data['command']) {
+                var contextstr = this.renderContextString(data);
+                var stepnum = this.renderContextStepNumber(data);
+                cell.innerHTML += "<span class='stepnum' title='" + this.escapeHtml(contextstr) + "'>" + this.escapeHtml(stepnum) + "</span>";
+                cell.innerHTML += "<span class='stepident'>" + this.escapeHtml(contextstr) + "</span>";
             } else if (data['command'] && "run" == data['command']) {
                 cell.innerHTML +=
-                "<span class='cmdname' title='" + data['command'] + "'>" + data['command'] + "</span>";
+                "<span class='stepident' title='" + data['command'] + "'>" + data['command'] + "</span>";
             }
             if (data['context']) {
                 //split context into project,type,object
@@ -981,8 +1225,10 @@ var FollowControl = Class.create({
         if (this.groupOutput.value && this.collapseCtx.value) {
             Element.hide($(this.lastTBody));
             cell2.addClassName('closed');
+            tr.addClassName('closed');
         } else {
             cell2.addClassName('opened');
+            tr.addClassName('opened');
         }
     },
 
@@ -1010,7 +1256,7 @@ var FollowControl = Class.create({
         if (null == this.lastTBody) {
             this.lastTBody = tbl.tBodies[0];
         }
-        if (null == this.lastrow || this.lastrow['module'] != data['module'] || this.lastrow['command'] != data['command']
+        if (null == this.lastrow  || this.lastrow['command'] != data['command']
             || this.lastrow['node'] != data['node'] || this.lastrow['context'] != data['context']) {
             if (null != this.lastrow) {
                 this.createFinalContextTbody(data, tbl, ctxid);
@@ -1032,27 +1278,48 @@ var FollowControl = Class.create({
         var tdicon = $(tr.insertCell(0));
         tdicon.setAttribute('width', '16');
         tdicon.addClassName('info');
-        tdicon.setAttribute('style', 'vertical-align:top');
         if (data.level == 'ERROR' || data.level == 'SEVERE') {
-            var img = new Element('img');
-            img.setAttribute('alt', data.level);
-            img.setAttribute('title', data.level);
-            img.setAttribute('width', '16');
-            img.setAttribute('height', '16');
-            img.setAttribute('src', AppImages.iconSmallPrefix + data.level.toLowerCase() + '.png');
-            tdicon.appendChild(img);
             this.contextStatus[ctxid] = data.level.toLowerCase();
         }
         var tdtime = $(tr.insertCell(1));
-        tdtime.setAttribute('width', '20');
+        //tdtime.setAttribute('width', '20');
         tdtime.addClassName('info');
         tdtime.addClassName('time');
-        tdtime.setAttribute('style', 'vertical-align:top;');
         tdtime.innerHTML = "<span class=\"" + data.level + "\">" + data.time + "</span>";
-        var tddata = $(tr.insertCell(2));
+        if(data.absolute_time){
+            tdtime.setAttribute('title', data.absolute_time);
+        }
+        var cellndx=2;
+        var colspan="2";
+        var tdnode=$(tr.insertCell(cellndx));
+        cellndx++;
+        tdnode.addClassName('node');
+        var shownode=false;
+        if (this.lastrow && typeof(this.lastrow['node'])!=undefined && data.node==this.lastrow['node']){
+            tdnode.addClassName('repeat');
+        }else if (!data.node) {
+            tdnode.addClassName('empty');
+            shownode = true;
+        } else{
+            tdnode.setAttribute('title', data.node);
+            tdnode.innerHTML = data.node;
+            shownode=true;
+        }
+        colspan="1";
+
+        //add context column
+        var tdctx = $(tr.insertCell(cellndx));
+        cellndx++;
+        tdctx.addClassName('stepnum');
+        if (!shownode && this.lastrow && this.lastrow['command'] == data['command'] ) {
+//                tdctx.addClassName('repeat');
+        }else{
+            tdctx.innerHTML = this.renderContextStepNumber(data);
+            tdctx.setAttribute('title',this.renderContextString(data));
+        }
+        var tddata = $(tr.insertCell(cellndx));
         tddata.addClassName('data');
-        tddata.setAttribute('style', 'vertical-align:top');
-        tddata.setAttribute('colspan', '2');
+        tddata.setAttribute('colspan', colspan);
         if (null != data['loghtml']) {
             tddata.innerHTML = data.loghtml;
             tddata.addClassName('datahtml log_'+ data.level.toLowerCase());
@@ -1061,6 +1328,9 @@ var FollowControl = Class.create({
             txt = txt.replace(/[\\\n\\\r]+$/, '');
             txt = txt.replace(/</g, '&lt;');
             txt = txt.replace(/>/g, '&gt;');
+            if(txt==''){
+                txt="\n";
+            }
             tddata.innerHTML = txt;
             tddata.addClassName('log_'+data.level.toLowerCase());
         }
@@ -1084,7 +1354,9 @@ var FollowControl = Class.create({
         $('commandPerform').show();
 
         this.displayCompletion(0);
-        $('progressContainer').show();
+        if ($('progressContainer')) {
+            $('progressContainer').show();
+        }
 //        this.setOutputAppendTop($F('outputappendtop') == "top");
 //        this.setOutputAutoscroll($F('outputautoscrolltrue') == "true");
 //        this.setGroupOutput($F('ctxshowgroup') == 'true');
@@ -1112,18 +1384,22 @@ var FollowControl = Class.create({
         if (this.runningcmd.failednodes && $('execRetry')) {
             $('execRetry').show();
         }
-        $('execRerun').show();
+        if($('execRerun')){
+            $('execRerun').show();
+        }
         if(typeof(this.onComplete)=='function'){
             this.onComplete();
         }
         this.jobFinishStatus(result);
     },
     jobFinishStatus: function(result) {
-        if (null != result && $('runstatus')) {
-            $('runstatus').innerHTML = result == 'succeeded' ? '<span class="succeed">Successful</span>'
-                : (result == 'aborted' ? '<span class="fail">Killed</span>' : '<span class="fail">Failed</span>');
+        if (null != result) {
+            if($('runstatus')){
+                $('runstatus').innerHTML = result == 'succeeded' ? '<span class="succeed">Succeeded</span>'
+                    : (result == 'aborted' ? '<span class="fail">Killed</span>' : '<span class="fail">Failed</span>');
+            }
             $$('.execstatus').each(function(e){
-                e.innerHTML = result == 'succeeded' ? '<span class="succeed">Successful</span>'
+                e.innerHTML = result == 'succeeded' ? '<span class="succeed">Succeeded</span>'
                 : (result == 'aborted' ? '<span class="fail">Killed</span>' : '<span class="fail">Failed</span>');
             });
             if ($('jobInfo_' + this.executionId)) {
@@ -1137,7 +1413,9 @@ var FollowControl = Class.create({
                 document.title =
                 (result == 'succeeded' ? '[OK] ' : result == 'aborted' ? '[KILLED] ' : '[FAILED] ') + document.title;
             }
-            $('cancelresult').hide();
+            if($('cancelresult')){
+                $('cancelresult').hide();
+            }
         }
     },
     beginFollowingOutput: function(id) {
@@ -1222,14 +1500,18 @@ var FollowControl = Class.create({
             if ($('avgDuration')) {
                 $('avgDuration').innerHTML = "???";
             }
-            $('progressContainer').hide();
+            if ($('progressContainer')) {
+                $('progressContainer').hide();
+            }
         }
     },
     displayCompletion: function(pct) {
         if ($('execDurationPct')) {
             $('execDurationPct').innerHTML = pct + "%";
         }
-        $('progressBar').style.width = (Math.floor(pct) * 4);
-        $('progressBar').innerHTML = (Math.floor(pct)) + "%";
+        if($('progressBar')){
+            $('progressBar').style.width = (Math.floor(pct) * 4);
+            $('progressBar').innerHTML = (Math.floor(pct)) + "%";
+        }
     }
 });

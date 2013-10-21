@@ -40,7 +40,7 @@
         <g:if test="${flash.error}">
             <span class="error note">${flash.error}</span>
         </g:if>
-    <g:set var="wasfiltered" value="${paginateParams.keySet().grep(~/(?!proj).*Filter|groupPath|idlist$/)}"/>
+    <g:set var="wasfiltered" value="${paginateParams?.keySet().grep(~/(?!proj).*Filter|groupPath|idlist$/)}"/>
     <g:if test="${params.createFilters}">
         <span class="note help">
             Enter filter parameters below and click "save this filter" to set a name and save it.
@@ -190,7 +190,7 @@
                                 <span class="action textbtn job_bulk_select_all" ><g:message code="select.all" /></span>
                                 <span class="action textbtn job_bulk_edit_hide " style="margin-left: 10px" >
                                     <g:message code="cancel" />
-                                    <g:img file="icon-tiny-removex.png" width="12px" height="12px" />
+                                    <g:img file="icon-tiny-removex-gray.png" width="12px" height="12px" />
                                 </span>
                             </div>
                             <div class="bulk_edit_controls " style="display: none; margin: 5px;">
@@ -210,10 +210,25 @@
                         </div>
                     </div>
                     </auth:resourceAllowed>
-                    <g:render template="groupTree" model="${[small:params.compact?true:false,currentJobs:jobgroups['']?jobgroups['']:[],wasfiltered:wasfiltered?true:false,nowrunning:nowrunning,nextExecutions:nextExecutions,jobauthorizations:jobauthorizations,authMap:authMap,nowrunningtotal:nowrunningtotal,max:max,offset:offset,paginateParams:paginateParams,sortEnabled:true]}"/>
+                    <g:render template="groupTree" model="${[small:params.compact?true:false,currentJobs:jobgroups['']?jobgroups['']:[],wasfiltered:wasfiltered?true:false,nowrunning:nowrunning, clusterMap: clusterMap,nextExecutions:nextExecutions,jobauthorizations:jobauthorizations,authMap:authMap,nowrunningtotal:nowrunningtotal,max:max,offset:offset,paginateParams:paginateParams,sortEnabled:true]}"/>
                     </g:form>
                     <g:timerEnd key="groupTree"/>
                 </g:if>
+                <g:else>
+                    <div class="presentation">
+                        No Jobs have been defined.
+
+                        <auth:resourceAllowed kind="job" action="${AuthConstants.ACTION_CREATE}">
+                            <ul>
+                            <li style="padding:5px"><g:link controller="scheduledExecution" action="create"
+                                                            class="button">Create a new Job&hellip;</g:link></li>
+                            <li style="padding:5px"><g:link controller="scheduledExecution" action="upload"
+                                                            class="button">Upload a Job definition&hellip;</g:link></li>
+                            </ul>
+                        </auth:resourceAllowed>
+
+                    </div>
+                </g:else>
     <g:timerStart key="tail"/>
             </td>
         </tr>
@@ -263,6 +278,7 @@
             $$('.jobbulkeditfield').each(Element.show);
             $$('.bulk_edit_controls').each(Element.show);
             $$('.bulk_edit_invoke').each(Element.hide);
+            $$('.expandComponent').each(Element.show);
         });
     });
     $$('.job_bulk_edit_hide').each(function(elem){
@@ -279,6 +295,7 @@
     });
     $$('.job_bulk_select_all').each(function(elem){
         Event.observe(elem,'click',function(e){
+            $$('.expandComponent').each(Element.show);
             $$('.jobbulkeditfield').each(function(z){
                 z.select('input[type=checkbox]').each(function(box){
                     box.checked=true;
@@ -288,6 +305,7 @@
     });
     $$('.job_bulk_select_none').each(function(elem){
         Event.observe(elem,'click',function(e){
+            $$('.expandComponent').each(Element.show);
             $$('.jobbulkeditfield').each(function(z){
                 z.select('input[type=checkbox]').each(function(box){
                     box.checked=false;

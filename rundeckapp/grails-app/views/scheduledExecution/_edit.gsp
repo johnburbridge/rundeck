@@ -1,3 +1,4 @@
+<%@ page import="com.dtolabs.rundeck.server.authorization.AuthConstants" %>
 <g:if test="${flash.message}">
     <div class="message">${flash.message}</div>
 </g:if>
@@ -106,22 +107,7 @@ var applinks={
             $('jobChooseSpinner').hide();
         }
 
-        function _menuDidCreateProject(value){
-            var selected=$F('schedEditFrameworkProject');
-            new Ajax.Updater('schedEditFrameworkProjectHolder','${createLink(controller:'framework',action:'projectSelect')}',{
-                parameters:{callback:'_editFormSelectProject',key:'project',noselection:'-Choose a Project-',nocreate:'true',selected:selected},
-                onComplete:function(transport){
-                    if (transport.request.success()) {
-                        if($('schedEditFrameworkProjectHolder').down('select')){
-                            $('schedEditFrameworkProjectHolder').down('select').setAttribute('id','schedEditFrameworkProject');
-                        }
-                    }
-                }
-            });
-        }
-        function _menuDidSelectProject(value){
-            return true;
-        }
+
 
         var wascancelled=false;
         function jobEditCancelled(){
@@ -184,6 +170,9 @@ var applinks={
         -webkit-border-radius: 3px;
         border-radius: 3px;
     }
+    #workflowContent ol li{
+        padding:0;
+    }
     #workflowContent ol li.hoverActive{
         border-top: 2px solid blue;
     }
@@ -197,21 +186,25 @@ var applinks={
     /*** ***/
     div.wfctrlholder{
         position:relative;
-        padding-right:100px;
+        padding-right:200px;
+    }
+    .wfitem{
+        display: block;
+        padding: 5px;
     }
     .wfitemcontrols{
         margin-left:10px;
         position:absolute;
         right:0;
         top:0;
-        width:200px;
+        width:250px;
         text-align:right;
     }
     .controls.autohide{
-        display:none;
+        visibility: hidden;
     }
     li:hover .controls.autohide{
-        display:block;
+        visibility: visible;
     }
 
     /** option controls and view layout **/
@@ -224,24 +217,25 @@ var applinks={
         position:absolute;
         right:0;
         top:0;
-        width:40px;
+        width:120px;
         text-align:right;
     }
     .optview{
         /*position:relative;*/
     }
     .optdetail{
-        float:left;
-        display:block;
-        width:380px;
+        /*float:left;*/
+        display:inline-block;
+        width:540px;
         overflow:hidden;
         white-space:nowrap;
         height:16px;
         line-height:16px;
     }
     .enforceSet{
-        position:absolute;
-        right: 45px;
+        /*position:absolute;*/
+        /*right: 45px;*/
+        display: inline-block;
         width:100px;
         overflow:hidden;
         white-space:nowrap;
@@ -252,8 +246,9 @@ var applinks={
         text-align:right;
     }
     .valuesSet{
-        position:absolute;
-        right: 150px;
+        /*position:absolute;*/
+        /*right: 150px;*/
+        display: inline-block;
         width: 60px;
         overflow:hidden;
         white-space:nowrap;
@@ -271,6 +266,7 @@ var applinks={
     }
     ul.options li{
         list-style:none;
+        padding: 4px;
     }
     div.inputset > div {
         clear:both;
@@ -309,50 +305,39 @@ var applinks={
     .add_step_buttons ul{
         margin:0;
         list-style-type: none;
+        padding-left:0;
     }
-    .add_step_buttons td{
-        vertical-align: top;
+    .add_step_buttons li.action{
+        padding:5px;
+        margin:0;
     }
-    .add_step_buttons td .action{
-        padding: 2px 0;
+    .add_step_buttons li.action:hover{
+    }
+
+    /**
+    job edit form table
+     */
+    table.jobeditform > tbody > tr > td:first-child{
+        width:120px;
+    }
+    /**
+    Ace editor
+    */
+    div.ace_text{
+        border:1px solid #aaa;
+    }
+    .pflowlist{
+        margin-right: 10px;
     }
 </style>
-<g:set var="wasSaved" value="${ (params?.saved=='true') || scheduledExecution?.id || scheduledExecution?.jobName || scheduledExecution?.scheduled}"/>
-    
+
 <input type="hidden" name="id" value="${scheduledExecution?.id}"/>
 <div class="note error" style="display: none" id="editerror">
     
 </div>
-<table class="simpleForm" cellspacing="0">
- <g:if test="${!scheduledExecution?.id}">
-    <tr id="saveJobQ" style="${wdgt.styleVisible(unless:scheduledExecution?.scheduled)}">
-        <td>Save this job?</td>
-        <td>
-            <label>
-            <g:radio name="saved" value="false"
-                checked="${!wasSaved}"
-                id="savedFalse" />
-            No</label>
+<table class="simpleForm jobeditform" cellspacing="0" style="width:100%">
 
-            <label>
-            <g:radio name="saved" value="true"
-                checked="${wasSaved}"
-                id="savedTrue"/>
-            Yes</label>
-            <g:javascript>
-                <wdgt:eventHandlerJS for="savedFalse" state="unempty" >
-                    <wdgt:action visible="false" targetSelector="tbody.savedJobFields"/>
-                    <wdgt:action check="true" target="scheduledFalse"/>
-                    <wdgt:action visible="false" target="scheduledExecutionEditCrontab"/>
-                </wdgt:eventHandlerJS>
-                <wdgt:eventHandlerJS for="savedTrue" state="unempty" >
-                    <wdgt:action visible="true" targetSelector="tbody.savedJobFields"/>
-                </wdgt:eventHandlerJS>
-            </g:javascript>
-        </td>
-    </tr>
-    </g:if>
-    <tbody class="savedJobFields" style=" ${wdgt.styleVisible(if:wasSaved)}" >
+    <tbody class="savedJobFields"  >
     <tr>
         <td>
             <label for="schedJobName" class=" ${hasErrors(bean:scheduledExecution,field:'jobName','fieldError')} required" id="schedJobNameLabel">
@@ -361,7 +346,8 @@ var applinks={
         </td>
         <td>
             <span class="input">
-                <input type='text' name="jobName" value="${scheduledExecution?.jobName.encodeAsHTML()}" id="schedJobName" size="40"/>
+                <g:textField name="jobName" value="${scheduledExecution?.jobName.encodeAsHTML()}" id="schedJobName"
+                       size="80"/>
                 <g:hasErrors bean="${scheduledExecution}" field="jobName">
                     <img src="${resource( dir:'images',file:'icon-small-warn.png' )}" alt="Error"  width="16px" height="16px" id="schedJobNameErr"/>
                     <wdgt:eventHandler for="schedJobName" state="unempty"  frequency="1">
@@ -383,10 +369,8 @@ var applinks={
                 <g:hasErrors bean="${scheduledExecution}" field="groupPath">
                     <img src="${resource( dir:'images',file:'icon-small-warn.png' )}" alt="Error"  width="16px" height="16px"/>
                 </g:hasErrors>
-                <input type='text' name="groupPath" value="${scheduledExecution?.groupPath?.encodeAsHTML()}" id="schedJobGroup" size="40"/>
-                <!--<span class="action" onclick="$('schedJobGroup').setValue('');" title="Clear Group field">
-                    <img src="${resource( dir:'images',file:'icon-tiny-removex-gray.png' )}" alt="Clear"  width="12px" height="12px"/>
-                </span>-->
+                <input type='text' name="groupPath" value="${scheduledExecution?.groupPath?.encodeAsHTML()}" id="schedJobGroup"
+                       size="80"/>
             </span>
 
             <span class="action button" onclick="loadGroupChooser(this);" id="groupChooseBtn" title="Select an existing group to use">Choose &hellip; <g:img file="icon-tiny-disclosure.png" width="12px" height="12px"/></span>
@@ -461,7 +445,7 @@ var applinks={
         </td>
         <td>
             <span class="input ${hasErrors(bean:scheduledExecution,field:'description','fieldError')}">
-                <g:textArea name="description" value="${scheduledExecution?.description}" cols="70" rows="2" />
+                <g:textArea name="description" value="${scheduledExecution?.description}" cols="80" rows="3" />
 
                 <g:hasErrors bean="${scheduledExecution}" field="description">
                     <img src="${resource( dir:'images',file:'icon-small-warn.png' )}" alt="Error" width="16px" height="16px"/>
@@ -486,7 +470,7 @@ var applinks={
             <g:else>
                 <span class="input">
                     <input type='text' name="uuid" value="${scheduledExecution?.uuid?.encodeAsHTML()}"
-                           id="schedJobUuid" size="40"/>
+                           id="schedJobUuid" size="36"/>
                     <g:hasErrors bean="${scheduledExecution}" field="uuid">
                         <img src="${resource(dir: 'images', file: 'icon-small-warn.png')}" alt="Error" width="16px"
                              height="16px" id="schedJobUuidErr"/>
@@ -524,23 +508,11 @@ var applinks={
         </td>
     </tr>
     </tbody>
-    <tr>
-        <td class="${hasErrors(bean:scheduledExecution,field:'project','fieldError')} required" id="schedProjErr">Project</td>
-        <td>
-            <div id="schedEditFrameworkProjectHolder">
-                <g:select id="schedEditFrameworkProject" name="project" from="${projects*.name}" value="${scheduledExecution.project?scheduledExecution.project.toString():projects?.size()==1?projects[0].name:session.project?session.project:''}" onchange="_editFormSelectProject(this.value);" noSelection="['':'-Choose a Project-']"/>
-            </div>
-            <g:hasErrors bean="${scheduledExecution}" field="project">
-                    <img src="${resource( dir:'images',file:'icon-small-warn.png' )}" alt="Error"  width="16px" height="16px" id="schedProjErrImg"/>
-                    <wdgt:eventHandler for="schedEditFrameworkProject" state="unempty" >
-                        <wdgt:action target="schedProjErr" removeClassname="fieldError"/>
-                        <wdgt:action visible="false" target="schedProjErrImg"/>
-                    </wdgt:eventHandler>
-                </g:hasErrors>
-        </td>
-    </tr>
 
-    <tbody id="optionsContent" class="savedJobFields" style=" ${wdgt.styleVisible(if:wasSaved)}">
+    <g:set var="projectName" value="${scheduledExecution.project?scheduledExecution.project.toString():projects?.size()==1?projects[0].name:session.project?session.project:''}" />
+    <g:hiddenField id="schedEditFrameworkProject" name="project" value="${projectName}" />
+
+    <tbody id="optionsContent" class="savedJobFields" >
         <tr>
             <td><span id="optsload"></span>Options:</td>
             <td>
@@ -596,157 +568,10 @@ var applinks={
             </td>
         </tr>
     </tbody>
-    <tbody class="savedJobFields" style="${wdgt.styleVisible(if:wasSaved)}" >
-    <g:set var="defSuccess" value="${scheduledExecution.findNotification('onsuccess','email')}"/>
-    <g:set var="isSuccess" value="${params.notifySuccessRecipients && 'true'==params.notifyOnsuccess ||  defSuccess}"/>
-    <g:set var="defSuccessUrl" value="${scheduledExecution.findNotification('onsuccess','url')}"/>
-    <g:set var="isSuccessUrl" value="${params.notifySuccessUrl && 'true'==params.notifyOnsuccessUrl ||  defSuccessUrl}"/>
-
-    <g:set var="defFailure" value="${scheduledExecution.findNotification('onfailure','email')}"/>
-    <g:set var="isFailure" value="${params.notifyFailureRecipients && 'true'==params.notifyOnfailure ||  defFailure}"/>
-    <g:set var="defFailureUrl" value="${scheduledExecution.findNotification('onfailure','url')}"/>
-    <g:set var="isFailureUrl" value="${params.notifyFailureUrl && 'true'==params.notifyOnfailureUrl ||  defFailureUrl}"/>
-    <tr>
-        <td>
-            Send Notification?
-        </td>
-        <td>
-            <label>
-            <g:radio value="false" name="notified"
-                checked="${!(isFailure||isSuccess || isSuccessUrl || isFailureUrl)}"
-                id="notifiedFalse"/>
-                No
-            </label>
-
-            <label>
-                <g:radio name="notified" value="true"
-                    checked="${isFailure||isSuccess || isSuccessUrl || isFailureUrl}"
-                    id="notifiedTrue"/>
-                Yes
-            </label>
-
-            <g:javascript>
-                <wdgt:eventHandlerJS for="notifiedTrue" state="unempty">
-                    <wdgt:action visible="true" targetSelector="tr.notifyFields"/>
-                </wdgt:eventHandlerJS>
-                <wdgt:eventHandlerJS for="notifiedFalse" state="unempty" >
-                    <wdgt:action visible="false" targetSelector="tr.notifyFields"/>
-
-                    <wdgt:action check="false" target="notifyOnsuccess"/>
-                    <wdgt:action visible="false" target="notifSuccessholder" />
-                    <wdgt:action check="false" target="notifyOnfailure"/>
-                    <wdgt:action visible="false" target="notifFailureholder" />
-                </wdgt:eventHandlerJS>
-            </g:javascript>
-        </td>
-    </tr>
-    <tr class="notifyFields" style="${wdgt.styleVisible(if:isFailure||isSuccess || isSuccessUrl || isFailureUrl)}">
-
-        <!-- onsuccess-->
-        <td>
-            <label for="notifyOnsuccess" class=" ${hasErrors(bean:scheduledExecution,field:'notifySuccessRecipients','fieldError')} ${hasErrors(bean: scheduledExecution, field: 'notifySuccessUrl', 'fieldError')}">
-                <g:message code="notification.event.onsuccess"/>
-            </label>
-        </td>
-        <td>
-            <div>
-                <span>
-                    <g:checkBox name="notifyOnsuccess" value="true" checked="${isSuccess?true:false}" />
-                    <label for="notifyOnsuccess">Send Email</label>
-                </span>
-                <span id="notifSuccessholder" style="${wdgt.styleVisible(if:isSuccess)}">
-                    <label>to: <g:textField name="notifySuccessRecipients"  cols="70" rows="3"  value="${defSuccess?defSuccess.content:params.notifySuccessRecipients}" size="60"/></label>
-                    <div class="info note">comma-separated email addresses</div>
-                    <g:hasErrors bean="${scheduledExecution}" field="notifySuccessRecipients">
-                        <div class="fieldError">
-                            <g:renderErrors bean="${scheduledExecution}" as="list" field="notifySuccessRecipients"/>
-                        </div>
-                    </g:hasErrors>
-                </span>
-                <wdgt:eventHandler for="notifyOnsuccess" state="checked" target="notifSuccessholder" visible="true"/>
-            </div>
-            <div>
-                <span>
-                    <g:checkBox name="notifyOnsuccessUrl" value="true" checked="${isSuccessUrl?true:false}" />
-                    <label for="notifyOnsuccessUrl">Webhook</label>
-                </span>
-                <span id="notifSuccessholder2" style="${wdgt.styleVisible(if: isSuccessUrl)}">
-                    <label>POST to URLs:
-                        <g:set var="notifsuccessurlcontent" value="${defSuccessUrl?defSuccessUrl.content:params.notifySuccessUrl}"/>
-                        <g:if test="${notifsuccessurlcontent && notifsuccessurlcontent.length()>30}">
-                            <textarea name="notifySuccessUrl"
-                                style="vertical-align:top;"
-                                rows="6" cols="40">${notifsuccessurlcontent?.encodeAsHTML()}</textarea>
-                        </g:if>
-                        <g:else>
-                            <g:textField name="notifySuccessUrl"  cols="70" rows="3"  value="${notifsuccessurlcontent?.encodeAsHTML()}" size="60"/>
-                        </g:else>
-                    </label>
-                    <div class="info note">comma-separated URLs</div>
-                    <g:hasErrors bean="${scheduledExecution}" field="notifySuccessUrl">
-                        <div class="fieldError">
-                            <g:renderErrors bean="${scheduledExecution}" as="list" field="notifySuccessUrl"/>
-                        </div>
-                    </g:hasErrors>
-                </span>
-                <wdgt:eventHandler for="notifyOnsuccessUrl" state="checked" target="notifSuccessholder2" visible="true" />
-            </div>
-        </td>
-    </tr>
-
-    <tr class="notifyFields"  style="${wdgt.styleVisible(if:isFailure||isSuccess || isSuccessUrl || isFailureUrl)}">
-
-        <!-- onfailure-->
-        <td>
-            <label for="notifyOnfailure" class=" ${hasErrors(bean:scheduledExecution,field:'notifyFailureRecipients','fieldError')}">
-                <g:message code="notification.event.onfailure"/>
-            </label>
-        </td>
-        <td>
-            <div>
-                <span>
-                    <g:checkBox name="notifyOnfailure" value="true" checked="${isFailure?true:false}"/>
-                    <label for="notifyOnfailure">Send Email</label>
-                </span>
-                <span id="notifFailureholder" style="${wdgt.styleVisible(if:isFailure)}">
-                    <label>to: <g:textField name="notifyFailureRecipients"  cols="70" rows="3" value="${defFailure?defFailure.content:params.notifyFailureRecipients}" size="60"/></label>
-                    <div class="info note">comma-separated email addresses</div>
-                    <g:hasErrors bean="${scheduledExecution}" field="notifyFailureRecipients">
-                        <div class="fieldError">
-                            <g:renderErrors bean="${scheduledExecution}" as="list" field="notifyFailureRecipients"/>
-                        </div>
-                    </g:hasErrors>
-                </span>
-                <wdgt:eventHandler for="notifyOnfailure" state="checked" target="notifFailureholder" visible="true" />
-            </div>
-            <div>
-                <span>
-                    <g:checkBox name="notifyOnfailureUrl" value="true" checked="${isFailureUrl?true:false}"/>
-                    <label for="notifyOnfailureUrl">Webhook</label>
-                </span>
-                <span id="notifFailureholder2" style="${wdgt.styleVisible(if:isFailureUrl)}">
-                    <label>POST to URLs:
-                        <g:set var="notiffailureurlcontent" value="${defFailureUrl?defFailureUrl.content:params.notifyFailureUrl}"/>
-                        <g:if test="${notiffailureurlcontent && notiffailureurlcontent.length()>30}">
-                            <textarea name="notifyFailureUrl"
-                                style="vertical-align:top;"
-                                rows="6" cols="40">${notiffailureurlcontent?.encodeAsHTML()}</textarea>
-                        </g:if>
-                        <g:else>
-                            <g:textField name="notifyFailureUrl" cols="70" rows="3" value="${notiffailureurlcontent?.encodeAsHTML()}" size="60"/>
-                        </g:else>
-                    </label>
-                    <div class="info note">comma-separated URLs</div>
-                    <g:hasErrors bean="${scheduledExecution}" field="notifyFailureUrl">
-                        <div class="fieldError">
-                            <g:renderErrors bean="${scheduledExecution}" as="list" field="notifyFailureUrl"/>
-                        </div>
-                    </g:hasErrors>
-                </span>
-                <wdgt:eventHandler for="notifyOnfailureUrl" state="checked" target="notifFailureholder2" visible="true" />
-            </div>
-        </td>
-    </tr>
+    <tbody class="savedJobFields"  >
+    <g:set var="adminauth"
+           value="${auth.resourceAllowedTest(type: 'project', name: session.project, action: [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_READ], context: 'application')}"/>
+        <g:render template="editNotifications" model="[scheduledExecution:scheduledExecution, notificationPlugins: notificationPlugins,adminauth:adminauth]"/>
 
     <tr >
         <td>
@@ -773,15 +598,6 @@ var applinks={
                 <g:render template="editCrontab" model="[scheduledExecution:scheduledExecution, crontab:crontab]"/>
 
                 <div class="clear"></div>
-                <%--
-                <div class="floatl clear crontab" style="margin-top: 5px;">
-                    Execute as user:
-                    <g:textField name="user" value="${scheduledExecution?.user}" size="12"/>
-                </div>
-
-                <div class="clear"></div>
-
-                --%>
             </div>
             <g:javascript>
                 <wdgt:eventHandlerJS for="scheduledTrue" state="unempty">
@@ -985,7 +801,7 @@ var applinks={
     </tbody>
     <tbody style="${wdgt.styleVisible(if:scheduledExecution?.doNodedispatch)}" class="subfields nodeFilterFields">
     <tr>
-        <td onclick="_formUpdateMatchedNodes()"><span id="mnodeswait"></span> <span class="button action textbtn" title="click to refresh">Matched nodes</span></td>
+        <td onclick="_formUpdateMatchedNodes()"><span id="mnodeswait"></span> <span class="action textbtn" title="click to refresh">Matched nodes</span></td>
         <td id="matchednodes" class="embed matchednodes" >
             <span class="action textbtn" onclick="_formUpdateMatchedNodes()">Update...</span>
         </td>
@@ -1000,7 +816,7 @@ var applinks={
         <tr>
             <td>
                 <label for="schedJobnodeThreadcount" class=" ${hasErrors(bean:scheduledExecution,field:'nodeThreadcount','fieldError')}">
-                    Thread Count
+                    <g:message code="scheduledExecution.property.nodeThreadcount.label" />
                 </label>
             </td>
             <td>
@@ -1016,7 +832,7 @@ var applinks={
                     </g:hasErrors>
                 </span>
                 <span class="info note">
-                    Maximum number of parallel threads to use.
+                    <g:message code="scheduledExecution.property.nodeThreadcount.description" />
                 </span>
 
             </td>
@@ -1061,19 +877,21 @@ var applinks={
             </td>
         </tr>
         <tr>
-            <td>Keep going on error?</td>
+            <td><g:message code="scheduledExecution.property.nodeKeepgoing.prompt" /></td>
             <td>
-                <label>
+                <div><label>
                 <g:radio name="nodeKeepgoing" value="false"
                     checked="${!scheduledExecution?.nodeKeepgoing}"
                     id="nodeKeepgoingFalse"/>
-                No</label>
+                    <g:message code="scheduledExecution.property.nodeKeepgoing.false.description"/>
+                </label></div>
 
-                <label>
+                <div><label>
                 <g:radio name="nodeKeepgoing" value="true"
                     checked="${scheduledExecution?.nodeKeepgoing}"
                     id="nodeKeepgoingTrue"/>
-                Yes</label>
+                    <g:message code="scheduledExecution.property.nodeKeepgoing.true.description"/>
+                </label></div>
             </td>
         </tr>
     </tbody>
@@ -1082,7 +900,7 @@ var applinks={
         <td>
             <g:select name="loglevel"
                       from="${['1. Debug','2. Verbose','3. Information','4. Warning','5. Error']}"
-                      keys="${['DEBUG','VERBOSE','INFO','WARN','ERR']}"
+                      keys="${['DEBUG','VERBOSE','INFO','WARN','ERROR']}"
                       value="${scheduledExecution.loglevel?scheduledExecution.loglevel:'WARN'}"
                 />
             <div class="info note">
@@ -1098,4 +916,5 @@ var applinks={
         initTooltipForElements('.obs_tooltip');
     }
 </g:javascript>
+<!--[if (gt IE 8)|!(IE)]><!--> <g:javascript library="ace/ace"/><!--<![endif]-->
 <div id="msg"></div>

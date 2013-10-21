@@ -1,23 +1,12 @@
-import java.util.logging.LogRecord
-import java.text.SimpleDateFormat
-import grails.test.GrailsUnitTestCase
-import org.codehaus.groovy.grails.commons.ConfigurationHolder
+import com.dtolabs.rundeck.core.common.NodeSetImpl
 import com.dtolabs.rundeck.core.execution.StepExecutionItem
 import com.dtolabs.rundeck.core.execution.workflow.steps.node.impl.ExecCommandExecutionItem
 import com.dtolabs.rundeck.core.execution.workflow.steps.node.impl.ScriptFileCommandExecutionItem
 import com.dtolabs.rundeck.core.execution.workflow.steps.node.impl.ScriptURLCommandExecutionItem
-import rundeck.CommandExec
-import rundeck.ScheduledExecution
-import rundeck.Execution
-import rundeck.Workflow
-import rundeck.Option
-import rundeck.User
-import rundeck.services.ExecutionService
-import rundeck.services.ExecutionServiceException
-import rundeck.services.HtTableLogger
-import rundeck.services.HtFormatter
-import rundeck.services.FrameworkService
-import com.dtolabs.rundeck.core.common.NodeSetImpl
+import grails.test.GrailsUnitTestCase
+import org.codehaus.groovy.grails.commons.ConfigurationHolder
+import rundeck.*
+import rundeck.services.*
 
 class ExecutionServiceTests extends GrailsUnitTestCase {
 
@@ -39,6 +28,7 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
         )
         se.save()
 
+        registerMetaClass(ScheduledExecution)
         ScheduledExecution.metaClass.static.lock={id-> return se}
         def myCriteria = new Expando();
         myCriteria.get = {Closure cls -> return [id:123]}
@@ -74,6 +64,7 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
         )
         se.save()
 
+        registerMetaClass(ScheduledExecution)
         ScheduledExecution.metaClass.static.lock={id-> return se}
         ScheduledExecution.metaClass.static.withNewSession={clos-> clos.call([clear:{}])}
         def myCriteria = new Expando();
@@ -97,8 +88,6 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
         ScheduledExecution se = new ScheduledExecution(
             jobName: 'blue',
             project: 'AProject',
-            adhocExecution: true,
-            adhocFilepath: '/this/is/a/path',
             groupPath: 'some/where',
             description: 'a job',
             argString: '-a b -c d',
@@ -106,6 +95,7 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
         )
         se.save()
 
+        registerMetaClass(ScheduledExecution)
         ScheduledExecution.metaClass.static.lock={id-> return se}
         ScheduledExecution.metaClass.static.withNewSession = {clos -> clos.call([clear: {}])}
         def myCriteria = new Expando();
@@ -126,6 +116,93 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
         assertEquals(se, e.scheduledExecution)
         assertNotNull(e.dateStarted)
         assertNull(e.dateCompleted)
+        assertEquals('user1',e.user)
+        def execs=se.executions
+        assertNull(execs)
+    }
+    void testCreateExecutionJobUser(){
+        ConfigurationHolder.config=[:]
+        mockDomain(ScheduledExecution)
+        mockDomain(Workflow)
+        mockDomain(CommandExec)
+        mockDomain(Execution)
+
+        ScheduledExecution se = new ScheduledExecution(
+            jobName: 'blue',
+            project: 'AProject',
+            user:'bob',
+            groupPath: 'some/where',
+            description: 'a job',
+            argString: '-a b -c d',
+            workflow: new Workflow(keepgoing: true, commands: [new CommandExec([adhocRemoteString: 'test buddy', argString: '-delay 12 -monkey cheese -particle'])]),
+        )
+        se.save()
+
+        registerMetaClass(ScheduledExecution)
+        ScheduledExecution.metaClass.static.lock={id-> return se}
+        ScheduledExecution.metaClass.static.withNewSession = {clos -> clos.call([clear: {}])}
+        def myCriteria = new Expando();
+        myCriteria.get = {Closure cls -> return null}
+        Execution.metaClass.static.createCriteria = {myCriteria }
+        Execution.metaClass.static.executeQuery = {q, h -> []}
+
+
+        mockLogging(ExecutionService)
+        ExecutionService svc = new ExecutionService()
+        FrameworkService fsvc = new FrameworkService()
+        svc.frameworkService=fsvc
+
+        Execution e=svc.createExecution(se,null,null)
+
+        assertNotNull(e)
+        assertEquals('-a b -c d',e.argString)
+        assertEquals(se, e.scheduledExecution)
+        assertNotNull(e.dateStarted)
+        assertNull(e.dateCompleted)
+        assertEquals('bob',e.user)
+        def execs=se.executions
+        assertNull(execs)
+    }
+    void testCreateExecutionAsUser(){
+        ConfigurationHolder.config=[:]
+        mockDomain(ScheduledExecution)
+        mockDomain(Workflow)
+        mockDomain(CommandExec)
+        mockDomain(Execution)
+
+        ScheduledExecution se = new ScheduledExecution(
+            jobName: 'blue',
+            project: 'AProject',
+            user:'bob',//created or scheduled job has user setting
+            groupPath: 'some/where',
+            description: 'a job',
+            argString: '-a b -c d',
+            workflow: new Workflow(keepgoing: true, commands: [new CommandExec([adhocRemoteString: 'test buddy', argString: '-delay 12 -monkey cheese -particle'])]),
+        )
+        se.save()
+
+        registerMetaClass(ScheduledExecution)
+        ScheduledExecution.metaClass.static.lock={id-> return se}
+        ScheduledExecution.metaClass.static.withNewSession = {clos -> clos.call([clear: {}])}
+        def myCriteria = new Expando();
+        myCriteria.get = {Closure cls -> return null}
+        Execution.metaClass.static.createCriteria = {myCriteria }
+        Execution.metaClass.static.executeQuery = {q, h -> []}
+
+
+        mockLogging(ExecutionService)
+        ExecutionService svc = new ExecutionService()
+        FrameworkService fsvc = new FrameworkService()
+        svc.frameworkService=fsvc
+
+        Execution e=svc.createExecution(se,null,"user1")
+
+        assertNotNull(e)
+        assertEquals('-a b -c d',e.argString)
+        assertEquals(se, e.scheduledExecution)
+        assertNotNull(e.dateStarted)
+        assertNull(e.dateCompleted)
+        assertEquals('user1', e.user)
         def execs=se.executions
         assertNull(execs)
     }
@@ -156,6 +233,7 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
         se.addToOptions(opt4)
         se.save()
 
+        registerMetaClass(ScheduledExecution)
         ScheduledExecution.metaClass.static.lock={id-> return se}
         ScheduledExecution.metaClass.static.withNewSession = {clos -> clos.call([clear: {}])}
         def myCriteria = new Expando();
@@ -172,7 +250,7 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
             Execution e=svc.createExecution(se,null,"user1",[argString:'-test1 asdf -test2 val2b -test4 asdf4'])
 
             assertNotNull(e)
-            assertEquals('-test1 asdf -test2 val2b -test3 val3',e.argString)
+            assertEquals("secure option value should not be stored",'-test1 asdf -test2 val2b -test3 val3',e.argString)
             assertEquals(se, e.scheduledExecution)
             assertNotNull(e.dateStarted)
             assertNull(e.dateCompleted)
@@ -183,7 +261,7 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
             Execution e=svc.createExecution(se,null,"user1",[argString:'-test2 val2b -test4 asdf4'])
 
             assertNotNull(e)
-            assertEquals('-test2 val2b -test3 val3',e.argString)
+            assertEquals("default value should be used",'-test1 val1 -test2 val2b -test3 val3',e.argString)
             assertEquals(se, e.scheduledExecution)
             assertNotNull(e.dateStarted)
             assertNull(e.dateCompleted)
@@ -194,7 +272,7 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
             Execution e=svc.createExecution(se,null,"user1",[argString:'-test2 val2b -test3 monkey3'])
 
             assertNotNull(e)
-            assertEquals('-test2 val2b -test3 monkey3',e.argString)
+            assertEquals('-test1 val1 -test2 val2b -test3 monkey3',e.argString)
             assertEquals(se, e.scheduledExecution)
             assertNotNull(e.dateStarted)
             assertNull(e.dateCompleted)
@@ -219,216 +297,6 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
                 assertTrue(e.message.contains("doesn't match regular expression"))
             }
         }
-
-
-    }
-    void testParseLogDetail() {
-        def s1 = "[greg@localhost Test.shellutil whoami][WARN] some more text"
-        def t1 = HtTableLogger.parseLogDetail(s1)
-        assert t1.size() > 0
-        assertEquals "greg", t1.user
-        assertEquals "localhost", t1.node
-        assertEquals "Test.shellutil", t1.context
-        assertEquals "whoami", t1.command
-        assertEquals "WARN", t1.level
-        assertEquals "some more text", t1.rest
-
-        def s2 = "[greg@localhost Test.shellutil.aName whoami][WARN] some more text"
-        def t2 = HtTableLogger.parseLogDetail(s2)
-        assert t2.size() > 0
-        assertEquals "user incorrect: ${t2.user}","greg", t2.user
-        assertEquals "node incorrect: ${t2.node}","localhost", t2.node
-        assertEquals "context incorrect: ${t2.context}","Test.shellutil.aName", t2.context
-        assertEquals "command incorrect: ${t2.command}","whoami", t2.command
-        assertEquals "level incorrect: ${t2.level}","WARN", t2.level
-        assertEquals "rest incorrect: ${t2.rest}","some more text", t2.rest
-
-        def s3 = "[greg@Gozer.local Test.shellutil ProduceSomething][INFO] some more text"
-        def t3 = HtTableLogger.parseLogDetail(s3)
-        assert t3.size() > 0
-        assertEquals "greg", t3.user
-        assertEquals "Gozer.local", t3.node
-        assertEquals "Test.shellutil", t3.context
-        assertEquals "ProduceSomething", t3.command
-        assertEquals "INFO", t3.level
-        assertEquals "some more text", t3.rest
-
-        //allow simplified format [user@host][LEVEL] msg
-        def s4 = "[greg@Gozer.local][WARN] some more text"
-        def t4 = HtTableLogger.parseLogDetail(s4)
-        assert t4.size() > 0
-        assertEquals "greg", t4.user
-        assertEquals "Gozer.local", t4.node
-        assertNull    "context should be null",t4.context
-        assertNull    "command should be null",t4.command
-        assertEquals "WARN", t4.level
-        assertEquals "some more text", t4.rest
-
-
-        //allow simplified format [user@host][LEVEL] msg
-        def s5 = "[greg@rundeck@Gozer.local][WARN] some more text"
-        def t5 = HtTableLogger.parseLogDetail(s5)
-        assert t5.size() > 0
-        assertEquals "greg", t5.user
-        assertEquals "rundeck@Gozer.local", t5.node
-        assertNull    "context should be null",t5.context
-        assertNull    "command should be null",t5.command
-        assertEquals "WARN", t5.level
-        assertEquals "some more text", t5.rest
-
-
-        //test run format [user@host command][LEVEL] msg
-        def s6 = "[greg@rundeck@Gozer.local run][WARN] some more text"
-        def t6 = HtTableLogger.parseLogDetail(s6)
-        assert t6.size() > 0
-        assertEquals "greg", t6.user
-        assertEquals "rundeck@Gozer.local", t6.node
-        assertNull    "context should be null",t6.context
-        assertEquals "run",t6.command
-        assertEquals "WARN", t6.level
-        assertEquals "some more text", t6.rest
-
-
-        //*****
-        //test incorrect format in various ways...
-        //*****
-        //missing brackets
-        t:{
-            def text = "[greg@Gozer.local Test.shellutil ProduceSomething[INFO] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "[greg@Gozer.local Test.shellutil ProduceSomething]INFO] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "[greg@Gozer.local Test.shellutil ProduceSomething][INFO some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "greg@Gozer.local Test.shellutil ProduceSomething][INFO] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        //missing @ symbol in user@node
-        t:{
-            def text = "[greg.Gozer.local Test.shellutil ProduceSomething][INFO] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 2, map.size()
-        };
-
-        //single space indicates simple command name
-        t:{
-            def text = "[greg@Gozer.localTest.shellutil ProduceSomething][INFO] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 5, map.size()
-        };
-        t:{
-            def text = "[greg@Gozer.local Test.shellutilProduceSomething][INFO] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 5, map.size()
-        };
-        //empty loglevel
-        t:{
-            def text = "[greg@Gozer.local Test.shellutil ProduceSomething][] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        //single space is simple command
-        t:{
-            def text = "[greg@Gozer.local Test.shellutil][WARN] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 5, map.size()
-        };
-        t:{
-            def text = "[greg@Gozer.local][] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "[][WARN] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "[][] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "[] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        //missing level section
-        t:{
-            def text = "[greg@Gozer.local Test.shellutil ProduceSomething] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "[greg@Gozer.local Test.shellutil] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-        t:{
-            def text = "[greg@Gozer.local] some more text"
-            def map = HtTableLogger.parseLogDetail(text)
-            assertEquals 0, map.size()
-        };
-
-    }
-
-
-    void testHTFormatter(){
-        def SimpleDateFormat fmt = new SimpleDateFormat("hh:mm:ss")
-        def HtFormatter hf = new HtFormatter()
-        assertNotNull hf
-
-        //
-        def LogRecord lr = new LogRecord(java.util.logging.Level.SEVERE,"This is a test")
-        def String s =hf.format(lr)
-        def tstring = fmt.format(new Date(lr.getMillis()))
-        assertEquals "formatting was incorrect: ${s}","^^^${tstring}|SEVERE|This is a test^^^",s
-
-        //add extra \r char
-        lr = new LogRecord(java.util.logging.Level.SEVERE,"This is a test\r")
-        s =hf.format(lr)
-        tstring = fmt.format(new Date(lr.getMillis()))
-        assertEquals "formatting was incorrect: ${s}","^^^${tstring}|SEVERE|This is a test^^^",s
-
-        //add metadata
-        def map = [user:'user1',module:'AModule',command:'aCmd',node:'someNode',context:'Proj.AModule.something']
-        s =hf.format(lr,map)
-        tstring = fmt.format(new Date(lr.getMillis()))
-        assertEquals "formatting was incorrect: ${s}","^^^${tstring}|SEVERE|user1|AModule|aCmd|someNode|Proj.AModule.something|This is a test^^^",s
-
-        //define some blank metadata
-        map = [user:'',module:'AModule',command:'aCmd',node:'',context:'Proj.AModule.something']
-        s =hf.format(lr,map)
-        tstring = fmt.format(new Date(lr.getMillis()))
-        assertEquals "formatting was incorrect: ${s}","^^^${tstring}|SEVERE||AModule|aCmd||Proj.AModule.something|This is a test^^^",s
-
-
-        //define some null metadata
-        map = [/* user:'',*/ module:'AModule',command:'aCmd',/* node:'', */ context:'Proj.AModule.something']
-        s =hf.format(lr,map)
-        tstring = fmt.format(new Date(lr.getMillis()))
-        assertEquals "formatting was incorrect: ${s}","^^^${tstring}|SEVERE||AModule|aCmd||Proj.AModule.something|This is a test^^^",s
-
-        //define all null metadata
-        map = [:]
-        s =hf.format(lr,map)
-        tstring = fmt.format(new Date(lr.getMillis()))
-        assertEquals "formatting was incorrect: ${s}","^^^${tstring}|SEVERE||||||This is a test^^^",s
 
 
     }
@@ -773,23 +641,59 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
         def frameworkService = new FrameworkService()
         testService.frameworkService = frameworkService
 
-        t: {
-            //test regex and optional value
-            ScheduledExecution se2 = new ScheduledExecution()
-            se2.addToOptions(new Option(name: 'test1', enforced: false, multivalued: true,delimiter: "+"))
-            se2.addToOptions(new Option(name: 'test2', enforced: false, multivalued: true))
-            se2.addToOptions(new Option(name: 'test3', enforced: false, multivalued: false))
-            assertNotNull(se2.options)
-            assertEquals(3, se2.options.size())
+        //test regex and optional value
+        ScheduledExecution se2 = new ScheduledExecution()
+        se2.addToOptions(new Option(name: 'test1', enforced: false, multivalued: true,delimiter: "+"))
+        se2.addToOptions(new Option(name: 'test2', enforced: false, multivalued: true))
+        se2.addToOptions(new Option(name: 'test3', enforced: false, multivalued: false))
+        assertNotNull(se2.options)
+        assertEquals(3, se2.options.size())
 
-            assertEquals "-test3 'some value'", ExecutionService.generateJobArgline(se2, ['test3': 'some value'])
-            assertEquals "-test2 'some value'", ExecutionService.generateJobArgline(se2, ['test2': 'some value'])
-            assertEquals "-test1 'some value'", ExecutionService.generateJobArgline(se2, ['test1': 'some value'])
-            //multivalue
-            assertEquals "-test1 'some value+another value'", ExecutionService.generateJobArgline(se2, ['test1': ['some value','another value']])
-            assertEquals "-test2 'some value,another value'", ExecutionService.generateJobArgline(se2, ['test2': ['some value','another value']])
-            assertEquals "-test3 'some value,another value'", ExecutionService.generateJobArgline(se2, ['test3': ['some value','another value']])
-        }
+        assertEquals "-test1 \"some value\"", ExecutionService.generateJobArgline(se2, ['test1': 'some value'])
+        //multivalue
+        assertEquals "-test1 \"some value+another value\"", ExecutionService.generateJobArgline(se2, ['test1': ['some value','another value']])
+        assertEquals "-test2 \"some value,another value\"", ExecutionService.generateJobArgline(se2, ['test2': ['some value','another value']])
+        assertEquals "-test3 \"some value,another value\"", ExecutionService.generateJobArgline(se2, ['test3': ['some value','another value']])
+    }
+    void testGenerateJobArglinePreservesOptionSortIndexOrder() {
+        mockDomain(ScheduledExecution)
+        mockDomain(Option)
+        ScheduledExecution se = new ScheduledExecution()
+        def testService = new ExecutionService()
+        def frameworkService = new FrameworkService()
+        testService.frameworkService = frameworkService
+
+        //test regex and optional value
+        ScheduledExecution se2 = new ScheduledExecution()
+        se2.addToOptions(new Option(name: 'abc', enforced: false, multivalued: true,delimiter: "+"))
+        se2.addToOptions(new Option(name: 'zyx', enforced: false, multivalued: true,sortIndex: 1))
+        se2.addToOptions(new Option(name: 'pst', enforced: false, multivalued: false,sortIndex: 0))
+        assertNotNull(se2.options)
+        assertEquals(3, se2.options.size())
+
+        assertEquals "-zyx value", ExecutionService.generateJobArgline(se2, ['zyx': 'value'])
+        assertEquals "-pst blah -zyx value", ExecutionService.generateJobArgline(se2, ['zyx': 'value','pst':'blah'])
+        assertEquals "-pst blah -zyx value -abc elf", ExecutionService.generateJobArgline(se2, ['zyx': 'value','pst':'blah', abc:'elf'])
+    }
+    void testGenerateJobArglineQuotesBlanks() {
+        mockDomain(ScheduledExecution)
+        mockDomain(Option)
+        ScheduledExecution se = new ScheduledExecution()
+        def testService = new ExecutionService()
+        def frameworkService = new FrameworkService()
+        testService.frameworkService = frameworkService
+
+        //test regex and optional value
+        ScheduledExecution se2 = new ScheduledExecution()
+        se2.addToOptions(new Option(name: 'abc', enforced: false, multivalued: true,delimiter: "+"))
+        se2.addToOptions(new Option(name: 'zyx', enforced: false, multivalued: true,sortIndex: 1))
+        se2.addToOptions(new Option(name: 'pst', enforced: false, multivalued: false,sortIndex: 0))
+        assertNotNull(se2.options)
+        assertEquals(3, se2.options.size())
+
+        assertEquals "-zyx value", ExecutionService.generateJobArgline(se2, ['zyx': 'value'])
+        assertEquals "-pst blah -zyx value", ExecutionService.generateJobArgline(se2, ['zyx': 'value','pst':'blah'])
+        assertEquals "-pst blah -zyx value -abc elf", ExecutionService.generateJobArgline(se2, ['zyx': 'value','pst':'blah', abc:'elf'])
     }
 
     /**
@@ -824,39 +728,6 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
             assertEquals(1,val.loglevel)
             assertNull(val.framework)
             assertNull(val.executionListener)
-        }
-    }
-
-    /**
-     * Test createContext
-     */
-    void testCreateContextUserDNE() {
-        mockDomain(Execution)
-        mockDomain(User)
-        ConfigurationHolder.metaClass.getConfig = {-> [:] }
-
-        def testService = new ExecutionService()
-        def fcontrol = mockFor(FrameworkService, true)
-        fcontrol.demand.parseOptsFromString(1..1) {argString ->
-            [test: 'args']
-        }
-        fcontrol.demand.filterNodeSet(1..1) {fwk, sel, proj ->
-            new NodeSetImpl()
-        }
-        testService.frameworkService = fcontrol.createMock()
-        //create mock user
-        User u1 = new User(login: 'testuser')
-        u1.save()
-        t:{//test DNE user
-
-            Execution se = new Execution(argString:"-test args",user:"DNEuser",project:"testproj", loglevel:'WARN',doNodedispatch: false)
-            try {
-                def val=testService.createContext(se,null,null,null,null,null,null)
-                fail("Should not succeed")
-            } catch (Exception e) {
-                assertEquals("User DNEuser is not authorized to run this Job.",e.message)
-            }
-
         }
     }
 
@@ -1254,5 +1125,102 @@ class ExecutionServiceTests extends GrailsUnitTestCase {
             assertNotNull(item.args)
             assertEquals(['some', 'args'], item.args as List)
         }
+    }
+
+    private ExecutionService setupCleanupService(){
+        def testService = new ExecutionService()
+
+        def fcontrol = mockFor(FrameworkService, true)
+        fcontrol.demand.getFrameworkNodeName(2..2) {
+            'testnode'
+        }
+        testService.frameworkService = fcontrol.createMock()
+
+        def rcontrol = mockFor(ReportService, true)
+        rcontrol.demand.reportExecutionResult(2..2) { map ->
+            [success: true]
+        }
+        testService.reportService = rcontrol.createMock()
+
+        def ncontrol = mockFor(NotificationService, true)
+        ncontrol.demand.triggerJobNotification(2..2) { String trigger, schedId, Map content ->
+            true
+        }
+        testService.notificationService = ncontrol.createMock()
+        return testService
+    }
+    void testCleanupRunningJobsNull(){
+        mockDomain(Execution)
+        mockDomain(Workflow)
+        mockDomain(CommandExec)
+        mockLogging(ExecutionService)
+        def testService = setupCleanupService()
+
+        Execution exec1 = new Execution(argString: "-test args", user: "testuser", project: "testproj", loglevel: 'WARN', doNodedispatch: false,
+                dateStarted: new Date(),
+                dateCompleted: null,
+                workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: "test")])
+        )
+        assertNotNull(exec1.save())
+        Execution exec2 = new Execution(argString: "-test args", user: "testuser", project: "testproj", loglevel: 'WARN', doNodedispatch: false,
+                dateStarted: new Date(),
+                dateCompleted: null,
+                workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: "test")]),
+                serverNodeUUID: UUID.randomUUID().toString()
+        )
+        assertNotNull(exec2.save())
+
+        assertNull(exec1.dateCompleted)
+        assertNull(exec1.status)
+
+        assertNull(exec2.dateCompleted)
+        assertNull(exec2.status)
+
+        testService.cleanupRunningJobs(null)
+
+        assertNotNull(exec1.dateCompleted)
+        assertEquals("false", exec1.status)
+
+        assertNull(exec2.dateCompleted)
+        assertEquals(null, exec2.status)
+
+    }
+
+    void testCleanupRunningJobsForClusterNode() {
+        mockDomain(Execution)
+        mockDomain(Workflow)
+        mockDomain(CommandExec)
+        mockLogging(ExecutionService)
+        def testService = setupCleanupService()
+        def uuid = UUID.randomUUID().toString()
+
+        Execution exec1 = new Execution(argString: "-test args", user: "testuser", project: "testproj", loglevel: 'WARN', doNodedispatch: false,
+                dateStarted: new Date(),
+                dateCompleted: null,
+                workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: "test")])
+        )
+        assertNotNull(exec1.save())
+        Execution exec2 = new Execution(argString: "-test args", user: "testuser", project: "testproj", loglevel: 'WARN', doNodedispatch: false,
+                dateStarted: new Date(),
+                dateCompleted: null,
+                workflow: new Workflow(commands: [new CommandExec(adhocRemoteString: "test")]),
+                serverNodeUUID: uuid
+        )
+        assertNotNull(exec2.save())
+
+        assertNull(exec1.dateCompleted)
+        assertNull(exec1.status)
+
+        assertNull(exec2.dateCompleted)
+        assertNull(exec2.status)
+
+        testService.cleanupRunningJobs(uuid)
+
+        assertNull(exec1.dateCompleted)
+        assertNull(exec1.status)
+
+        assertNotNull(exec2.dateCompleted)
+        assertEquals("false", exec2.status)
+
     }
 }

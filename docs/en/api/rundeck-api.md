@@ -7,7 +7,7 @@ Rundeck provides a Web API for use with your application.
 API Version Number
 ----
 
-The current API version is `6`.
+The current API version is `9`.
 
 For API endpoints described in this document, the *minimum* API version required for their
 use is indicated by the URL used, e.g.:
@@ -35,6 +35,32 @@ If the version number is not included or if the requested version number is unsu
 
 Changes introduced by API Version number:
 
+**Version 9**:
+
+* Updated endpoints 
+    * `/api/9/executions/running` - [Listing Running Executions](#listing-running-executions)
+        * Allow `project=*` to list running executions across all projects
+        * Result data now includes `project` attribute for each `<execution>`.
+    * `/api/9/jobs/import` - [Importing Jobs](#importing-jobs)
+        * Add `uuidOption` parameter to allow removing imported UUIDs to avoid creation conflicts.
+        
+**Version 8**:
+
+* Updated endpoints 
+    * `/api/8/run/script` and `/api/8/run/url` -  [Running Adhoc Scripts](#running-adhoc-scripts) and [Running Adhoc Script URLs](#running-adhoc-script-urls)
+        * Added two optional parameters for `scriptInterpreter` and `interpreterArgsQuoted`
+    * `/api/8/jobs/import` -  [Importing Jobs](#importing-jobs)
+        * Added an optional parameter `project` which will override any project defined in the Job definition contexts.  If used, the job definitions do not need a `project` value in them.
+* Removed endpoints
+    * `/api/1/report/create` - [Creating History Event Reports](#creating-history-event-reports)
+      * Removed due to History no longer supporting arbitrary event reports.
+
+**Version 7**:
+
+* Add **Incubator** endpoint
+    * PUT `/api/7/incubator/jobs/takeoverSchedule` - [Takeover Schedule in Cluster Mode](#takeover-schedule-in-cluster-mode)
+        * incubating feature for cluster mode schedule takeover
+
 **Version 6**:
 
 * Updated endpoints 
@@ -45,6 +71,17 @@ Changes introduced by API Version number:
         * **documentation typo fixed**: the JSON format incorrectly specified the log text key as 'mesg', corrected to 'log'
 
 **Version 5**:
+
+Added in Rundeck 1.4.6, 1.5.1:
+
+* New feature for some endpoints:
+    * new `asUser` parameter can record an action (run or abort) as having been performed by another user
+    * Affected endpoints
+        * [Running a Job](#running-a-job)
+        * [Running Adhoc Commands](#running-adhoc-commands)
+        * [Running Adhoc Scripts](#running-adhoc-scripts)
+        * [Running Adhoc Script URLs](#running-adhoc-script-urls)
+        * [Aborting Executions](#aborting-executions)
 
 * New endpoint
     * `/api/5/jobs/delete` - [Bulk Job Delete](#bulk-job-delete)
@@ -108,6 +145,8 @@ request to the Rundeck API.
 
 To obtain an API Token, you must first log in to the Rundeck GUI using a user account
 that has "admin" credentials. Click on your username in the header of the page, and you will be shown your User Profile page.  From this page you can manage your API Tokens.  Click "Generate API Token" to create a new one.  The unique string that is shown is the API Token.
+
+Alternately you can define tokens in static file, by setting the `rundeck.tokens.file` in [framework.properties](../administration/configuration.html#framework.properties).
 
 You must include one of the following with every HTTP request to the API:
 
@@ -441,7 +480,8 @@ URL:
 Optional parameters:
 
 * `argString`: argument string to pass to the job, of the form: `-opt value -opt2 value ...`.
-* `loglevel`: argument specifying the loglevel to use, one of: 'DEBUG','VERBOSE','INFO','WARN','ERR'
+* `loglevel`: argument specifying the loglevel to use, one of: 'DEBUG','VERBOSE','INFO','WARN','ERROR'
+* `asUser` : specifies a username identifying the user who ran the job. Requires `runAs` permission.
 * Node filter parameters as described under [Using Node Filters](#using-node-filters)
 
 Result:  An Item List of `executions` containing a single entry for the execution that was created.  See [Listing Running Executions](#listing-running-executions).
@@ -496,6 +536,10 @@ Optional parameters:
 
 * `format` : can be "xml" or "yaml" to specify the output format. Default is "xml"
 * `dupeOption`: A value to indicate the behavior when importing jobs which already exist.  Value can be "skip", "create", or "update". Default is "create".
+* `project` : (**since v8**) Specify the project that all job definitions should be imported to. If not specified, each job definition must define the project to import to.
+* `uuidOption`: Whether to preserve or remove UUIDs from the imported jobs. Allowed values (**since V9**):
+    *  `preserve`: Preserve the UUIDs in imported jobs.  This may cause the import to fail if the UUID is already used. (Default value).
+    *  `remove`: Remove the UUIDs from imported jobs. Allows update/create to succeed without conflict on UUID.
 
 Result:
 
@@ -649,11 +693,11 @@ URL:
 
 Required Parameters:
 
-* `project`: the project name
+* `project`: the project name, or '*' for all projects (**Since API v9**)
 
 Result: An Item List of `executions`.  Each `execution` of the form:
 
-    <execution id="[ID]" href="[url]" status="[status]">
+    <execution id="[ID]" href="[url]" status="[status]" project="[project]">
         <user>[user]</user>
         <date-started unixtime="[unixtime]">[datetime]</date-started>
         
@@ -694,6 +738,8 @@ The `[url]` value is a URL to the Rundeck server page to view the execution outp
 `[unixtime]` is the millisecond unix timestamp, and `[datetime]` is a W3C dateTime string in the format "yyyy-MM-ddTHH:mm:ssZ".
 
 If known, the average duration of the associated Job will be indicated (in milliseconds) as `averageDuration`. (Since API v5)
+
+**API v9 and above**: `project="[project]"` is the project name of the execution.
 
 ### Getting Execution Info
 
@@ -931,6 +977,10 @@ URL:
 
     /api/1/execution/[ID]/abort
 
+Optional Parameters:
+
+* `asUser` : specifies a username identifying the user who aborted the execution. Requires `runAs` permission.
+
 Result:  The result will contain a `success/message` element will contain a descriptive message.  The status of the abort action will be included as an element:
 
     <abort status="[abort-state]">
@@ -956,6 +1006,7 @@ Optional Parameters:
 
 * `nodeThreadcount`: threadcount to use
 * `nodeKeepgoing`: if "true", continue executing on other nodes even if some fail.
+* `asUser` : specifies a username identifying the user who ran the command. Requires `runAs` permission.
 
 Node filter parameters as described under [Using Node Filters](#using-node-filters)
 
@@ -989,6 +1040,9 @@ Optional Parameters:
 * `argString`: Arguments to pass to the script when executed.
 * `nodeThreadcount`: threadcount to use
 * `nodeKeepgoing`: if "true", continue executing on other nodes even if some fail.
+* `asUser` : specifies a username identifying the user who ran the script. Requires `runAs` permission.
+* `scriptInterpreter`: a command to use to run the script (*since version 8*)
+* `interpreterArgsQuoted`: `true`/`false`: if true, the script file and arguments will be quoted as the last argument to the `scriptInterpreter` (*since version 8*)
 
 Node filter parameters as described under [Using Node Filters](#using-node-filters)
 
@@ -996,6 +1050,8 @@ Result: A success message, and a single `<execution>` item identifying the
 new execution by ID:
 
     <execution id="X"/>
+
+**Since API version 8**: The script interpreter and whether the arguments to the interpreter are quoted can be specified.
 
 ### Running Adhoc Script URLs
 
@@ -1022,6 +1078,9 @@ Optional Parameters:
 * `argString`: Arguments to pass to the script when executed.
 * `nodeThreadcount`: threadcount to use
 * `nodeKeepgoing`: if "true", continue executing on other nodes even if some fail.
+* `asUser` : specifies a username identifying the user who ran the script. Requires `runAs` permission.
+* `scriptInterpreter`: a command to use to run the script (*since version 8*)
+* `interpreterArgsQuoted`: `true`/`false`: if true, the script file and arguments will be quoted as the last argument to the `scriptInterpreter` (*since version 8*)
 
 Node filter parameters as described under [Using Node Filters](#using-node-filters)
 
@@ -1029,6 +1088,8 @@ Result: A success message, and a single `<execution>` item identifying the
 new execution by ID:
 
     <execution id="X"/>
+
+**Since API version 8**: The script interpreter and whether the arguments to the interpreter are quoted can be specified.
 
 ### Listing Projects ###
 
@@ -1240,30 +1301,13 @@ The `events` element will also have `max`, `offset`, and `total` attributes, to 
 
 ### Creating History Event Reports
 
-Create a history event report for any external process.
+**REMOVED in version 8**
 
 URL:
 
     /api/1/report/create
 
-Required Parameters:
-
-* `project` : project name
-* `status` : report status, one of "succeeded", "failed" or "aborted"
-* `title` : Title of the report. This should be a short string identifying the process that was run.  E.g. Rundeck jobs use the Job Group and Job Name, and adhoc commands use the string "adhoc".
-* `summary` : A descriptive summary of the result.
-* `nodesuccesscount`:  number of successful nodes: how many nodes the process succeeded on.
-* `nodefailedcount`: number of failed nodes: how many nodes the process failed on.
-
-Optional Parameters:
-
-* `start`: Specify exact date for beginning of the process (defaults to the same as end).
-* `end`: Specify exact date for end of the process (defaults to time the report is received).
-* `script`: Full adhoc command or script that was run, if applicable.
-* `jobID`: Any associated Rundeck Job ID
-* `execID`: Any associated Rundeck Execution ID.
-
-The format for the `end`, and `start` values is either:  a unix millisecond timestamp, or a W3C dateTime string in the format "yyyy-MM-ddTHH:mm:ssZ".
+Requests will now return HTTP status code `404`.
 
 ### Listing Resources
 
@@ -1348,3 +1392,100 @@ Optional Parameters:
 Result: Depending on the `format` parameter, a value of "xml" will return [resources-v10(5)](resources-v10.html) and "yaml" will return [resources-v10-yaml(5)](resources-v10-yaml.html) formatted results.
 
 The result will contain a single item for the specified resource.
+
+### Takeover Schedule in Cluster Mode
+
+**INCUBATOR**: this endpoint is available under the `/incubator` top-level path to indicate it is under development, and the specific behavior may change before it is finalized, or even completely removed.
+
+Tell a Rundeck server in cluster mode to claim all scheduled jobs from another cluster server.
+
+URL:
+
+    /api/7/incubator/jobs/takeoverSchedule
+
+HTTP Method:
+
+    PUT
+
+Required Content:
+
+One of the following:
+
+* XML content:
+
+        <server uuid="[UUID]"/>
+
+* JSON content:
+
+        { server: { uuid: "[UUID]" } }
+
+Result: 
+
+If request was XML, then Standard API response containing the following additional elements:
+
+* `self`
+    * `server`
+        *  `@uuid` - this cluster server's uuid
+*  `takeoverSchedule`
+    *  `server`
+        *  `@uuid` - requested server uuid to take over
+    *  `jobs` - set of successful and failed jobs taken over
+        *  `successful`/`failed` - job set
+            *  `@count` number of jobs in the set
+            *  `job` - one element for each job
+                *  `@id` Job ID
+                *  `@href` Job HREF
+
+Example XML Response:
+
+    <result success='true' apiversion='7'>
+      <message>Schedule Takeover successful for 2/2 Jobs.</message>
+      <self>
+        <server uuid='C677C663-F902-4B97-B8AC-4AA57B58DDD6' />
+      </self>
+      <takeoverSchedule>
+        <server uuid='8F3D5976-2232-4529-847B-8E45764608E3' />
+        <jobs total='2'>
+          <successful count='2'>
+            <job id='a1aa53ac-73a6-4ead-bbe4-34afbff8e057'
+            href='http://localhost:9090/rundeck/job/show/a1aa53ac-73a6-4ead-bbe4-34afbff8e057' />
+            <job id='116e2025-7895-444a-88f7-d96b4f19fdb3'
+            href='http://localhost:9090/rundeck/job/show/116e2025-7895-444a-88f7-d96b4f19fdb3' />
+          </successful>
+          <failed count='0'></failed>
+        </jobs>
+      </takeoverSchedule>
+    </result>
+
+If request was JSON, then the following JSON:
+
+    {
+      "takeoverSchedule": {
+        "jobs": {
+          "failed": [],
+          "successful": [
+            {
+              "href": "http://dignan:4440/job/show/a1aa53ac-73a6-4ead-bbe4-34afbff8e057",
+              "id": "a1aa53ac-73a6-4ead-bbe4-34afbff8e057"
+            },
+            {
+              "href": "http://dignan:4440/job/show/116e2025-7895-444a-88f7-d96b4f19fdb3",
+              "id": "116e2025-7895-444a-88f7-d96b4f19fdb3"
+            }
+          ],
+          "total": 2
+        },
+        "server": {
+          "uuid": "8F3D5976-2232-4529-847B-8E45764608E3"
+        }
+      },
+      "self": {
+        "server": {
+          "uuid": "C677C663-F902-4B97-B8AC-4AA57B58DDD6"
+        }
+      },
+      "message": "Schedule Takeover successful for 2/2 Jobs.",
+      "apiversion": 7,
+      "success": true
+    }
+

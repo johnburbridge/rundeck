@@ -351,7 +351,7 @@ The [job](#job) context.
 
 [project](#project)
 
-:    the project name (required)
+:    the project name (optional)
 
 [options](#options)
 
@@ -360,15 +360,20 @@ The [job](#job) context.
 
 ### project 
 
-The [context](#context) project name.
+The [context](#context) project name.  Optional. If a project is not specified at import time, this value will be used.
 
 ### options
      
-The [context](#context)  options that correspond to the called [command](#command).
+The [context](#context) options for user input.
+
+preserveOrder
+
+  :  If set to "true", then the order of the [option](#option) elements will be preserved in
+     the Rundeck GUI.  Otherwise the options will be shown in alphabetical order.
 
 *Nested elements*
 
-option](#option)
+[option](#option)
 
 :    an option element
 
@@ -522,7 +527,7 @@ The [job](#job) logging level. The lower the more profuse the messages.
 * VERBOSE
 * INFO
 * WARN
-* ERR
+* ERROR
 
 ## nodefilters
      
@@ -748,6 +753,33 @@ Script URL:
         <scriptargs>-whatever something</scriptargs>
     </command>      
 
+#### Script Interpreter
+
+When using `<script>`, or `<scriptfile>`, you can declare an interpreter to use to execute the script and its args.
+
+Add `<scriptinterpreter>` to the `<command>`:
+
+    <command >
+        <scriptinterpreter>sudo -u usera</scriptinterpreter>
+        <scripturl>http://example.com/path/to/a/script</scripturl>
+        <scriptargs>-whatever something</scriptargs>
+    </command>
+
+This will be executed effectively with this commandline:
+
+    sudo -u usera script.sh -whatever something
+
+If the filename and arguments need to be quoted when passed to the interpreter, you can declare `argsQuoted='true'`:
+
+    <command >
+        <scriptinterpreter argsquoted='true'>sudo -u usera sh -c </scriptinterpreter>
+        <scripturl>http://example.com/path/to/a/script</scripturl>
+        <scriptargs>-whatever something</scriptargs>
+    </command>
+
+This will execute as:
+
+    sudo -u usera sh -c 'script.sh -whatever something'
 
 ### Job sequence step
 
@@ -765,6 +797,10 @@ group
 
 :    the group name
 
+nodeStep
+
+:    `true/false` whether the Job reference step should run for each node
+
 
 *Nested elements*
 
@@ -781,6 +817,10 @@ Example passing arguments to the job:
            <arg line="-option value -option2 value2"/>
         </jobref>
     </command>      
+
+If `nodeStep` is set to "true", then the Job Reference step will operate as a *Node Step* instead of the
+default.  As a *Node Step* it will execute once for each matched node in the containing Job workflow, and
+can use node attribute variable expansion in the arguments to the job reference.
 
 ### Plugin step
 
@@ -862,7 +902,7 @@ value
 
 ## notification 
 
-Defines email and webhook notifications for Job success and failure, with in a
+Defines email, webhook or plugin notifications for Job success and failure, with in a
 [job](#job) definition.
 
 *Nested elements*
@@ -875,6 +915,10 @@ Defines email and webhook notifications for Job success and failure, with in a
 
 :    define notifications for failure/kill result
 
+[onstart](#onstart)
+
+:    define notifications for job start
+
 *Example*
 
     <notification>
@@ -885,6 +929,13 @@ Defines email and webhook notifications for Job success and failure, with in a
             <email recipients="test@example.com" />
             <webhook urls="http://example.com?id=${execution.id}" />
        </onsuccess>
+        <onstart>
+            <plugin type="MyPlugin">
+              <configuration>
+                <entry key="customkey" value="customvalue"/>
+              </configuration>
+            </plugin>
+       </onstart>
     </notification>      
 
  
@@ -896,6 +947,9 @@ Embed an [email](#email) element to send email on success, within
 Embed an [webhook](#webhook) element to perform a HTTP POST to some URLs, within
 [notification](#notification).
 
+Embed an [plugin](#plugin) element to perform a custom action, within
+[notification](#notification).
+
 ### onfailure 
 
 Embed an [email](#email) element to send email on failure or kill,
@@ -904,10 +958,27 @@ within [notification](#notification).
 Embed an [webhook](#webhook) element to perform a HTTP POST to some URLs, within
 [notification](#notification).
 
+Embed an [plugin](#plugin) element to perform a custom action, within
+[notification](#notification).
+
+### onstart 
+
+Embed an [email](#email) element to send email on failure or kill,
+within [notification](#notification).
+
+Embed an [webhook](#webhook) element to perform a HTTP POST to some URLs, within
+[notification](#notification).
+
+Embed an [plugin](#plugin) element to perform a custom action, within
+[notification](#notification).
+
 ### email 
 
-Define email recipients for Job execution result, within
-[onsuccess](#onsuccess) or [onfailure](#onfailure).
+Define email recipients for Job execution result, within [onsuccess][], [onfailure][] or [onstart][].
+
+[onsuccess]: #onsuccess
+[onfailure]: #onfailure
+[onstart]: #onstart
 
 *Attributes*
 
@@ -921,7 +992,11 @@ recipients
 
 ### webhook
 
-Define URLs to submit a HTTP POST to containing the job execution result, within [onsuccess](#onsuccess) or [onfailure](#onfailure).
+Define URLs to submit a HTTP POST to containing the job execution result, within [onsuccess][], [onfailure][] or [onstart][].
+
+[onsuccess]: #onsuccess
+[onfailure]: #onfailure
+[onstart]: #onstart
 
 *Attributes*
 
@@ -935,6 +1010,63 @@ urls
         <webhook urls="http://server/callback?id=${execution.id}&status=${execution.status}&trigger=${notification.trigger}"/>
 
 * For more information about the Webhook mechanism used, see the chapter [Integration - Webhooks](manual/jobs.html#webhooks).
+
+### plugin
+
+Defines a configuration for a plugin to perform a Notification, within [onsuccess][], [onfailure][] or [onstart][].
+
+[onsuccess]: #onsuccess
+[onfailure]: #onfailure
+[onstart]: #onstart
+
+*Attributes*
+
+type
+
+:    The plugin provider type identifier
+
+*Nested elements*
+
+Optional 'configuration' can be embedded containing a list of 'entry' key/value pairs:
+
+[configuration](#configuration-1)
+
+:    Defines plugin configuration entries
+
+[entry](#entry-1)
+
+:    Defines a key/value pair for the configuration.
+
+
+Example notification plugin definition:
+
+    <onstart>
+        <plugin type="my-notification-plugin">
+           <configuration>
+            <entry key="someconfig" value="a value"/>
+            <entry key="timout" value="2000"/>
+           </configuration>
+        </plugin>
+    </onstart> 
+
+#### configuration
+
+Contains the key/value pair entries for plugin configuration, within a [plugin](#plugin) notification definition.
+
+#### entry
+
+Defines a key/value pair within a [configuration](#configuration-1).
+
+*Attributes*:
+
+key
+
+:    Key for the pair
+
+value
+
+:    Textual value
+
 
 # SEE ALSO
 

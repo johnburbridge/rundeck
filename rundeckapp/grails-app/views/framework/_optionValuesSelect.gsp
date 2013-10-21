@@ -41,7 +41,7 @@
         <g:else>
             <g:textField name="${realFieldName}"
                 class="optionvaluesfield"
-                value="${selectedvalue?selectedvalue:selectedoptsmap && selectedoptsmap[optName]?selectedoptsmap[optName]:optionSelect.defaultValue?optionSelect.defaultValue:''}"
+                value="${selectedvalue?selectedvalue:selectedoptsmap && null!=selectedoptsmap[optName]?selectedoptsmap[optName]:optionSelect.defaultValue?optionSelect.defaultValue:''}"
                 maxlength="256" size="40"
                 id="${fieldwatchid}"/>
         </g:else>
@@ -70,7 +70,7 @@
                 <g:set var="sellabel" value="${selentry}"/>
                 <g:set var="selvalue" value="${valuesMap?valuesMap[sellabel]:sellabel}"/>
             </g:else>
-            <g:hiddenField name="${realFieldName}" value="${selvalue.encodeAsHTML()}"/>
+            <g:hiddenField name="${realFieldName}" value="${selvalue}" id="${fieldwatchid}"/>
             <span class="singlelabel">${sellabel.encodeAsHTML()}</span>
         </g:if>
         <g:else>
@@ -90,10 +90,10 @@
                         </div>
                         <g:if test="${selectedoptsmap && selectedoptsmap[optName] && selectedoptsmap[optName] instanceof String}">
                             %{
-                                selectedoptsmap[optName]= selectedoptsmap[optName].split(optionSelect.delimiter)
+                                selectedoptsmap[optName]= selectedoptsmap[optName].split(optionSelect.delimiter) as List
                                 }%
                         </g:if>
-                        <g:set var="newvals" value="${selectedoptsmap ?selectedoptsmap[optName].findAll {optionSelect.values && !optionSelect.values.contains(it)}:null}"/>
+                        <g:set var="newvals" value="${selectedoptsmap ? optionSelect.values?selectedoptsmap[optName].findAll { !optionSelect.values.contains(it) } : selectedoptsmap[optName] : null}"/>
                         <g:if test="${newvals}">
                             <g:javascript>
                                 fireWhenReady('${rkey.encodeAsJavaScript()}varinput', function(){
@@ -164,6 +164,31 @@
 
             </g:javascript>
         </g:if>
+    </g:if>
+    <g:if test="${!optionSelect.enforced && !optionSelect.multivalued && !optionSelect.secureInput && optionSelect.defaultValue && !(optionSelect.values.contains(optionSelect.defaultValue))}">
+        <span class="action button"
+              id="${optName.encodeAsJavaScript()}_setdefault"
+              title="Click to use default value: ${optionSelect.defaultValue.encodeAsHTML()}"
+            style="${wdgt.styleVisible(if: selectedoptsmap && selectedoptsmap[optName]!=optionSelect.defaultValue)}"
+        >
+            default: <g:truncate max="50">${optionSelect.defaultValue.encodeAsHTML()}</g:truncate>
+        </span>
+        <g:javascript>
+            fireWhenReady('${optName.encodeAsJavaScript()}_setdefault',
+            function(){ $$('${'#' + optName.encodeAsJavaScript() + '_setdefault'}').each(function(e){
+                Event.observe(e,'click',function(evt){
+                    $('${fieldwatchid}').setValue('${optionSelect.defaultValue.encodeAsJavaScript()}');
+                });
+            }); }
+            );
+            <wdgt:eventHandlerJS
+                    for="${fieldwatchid}"
+                    notequals="${optionSelect.defaultValue.encodeAsJavaScript()}"
+                    visible="true"
+                    target="${optName.encodeAsHTML() + '_setdefault'}"
+                    frequency="1"
+                    inline='true'/>
+        </g:javascript>
     </g:if>
 
     <g:javascript>

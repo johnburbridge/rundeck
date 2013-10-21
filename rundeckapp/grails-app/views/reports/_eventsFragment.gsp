@@ -13,48 +13,44 @@
         </span>
     </g:if>
     <g:set var="wasfiltered" value="${paginateParams}"/>
-    <g:set var="filtersOpen" value="${params.createFilters||params.editFilters||params.saveFilter?true:false}"/>
-    <table cellspacing="0" cellpadding="0" class="queryTable" >
-        <tr>
+    <div class="queryTable">
         <g:if test="${!params.nofilters}">
-        <td style="text-align:left;vertical-align:top; ${wdgt.styleVisible(if:filtersOpen)}" id="${rkey}filter" >
-            <g:form >
+        <div id="${rkey}filter" >
+            <g:form action="index">
                 <g:if test="${params.compact}">
                     <g:hiddenField name="compact" value="${params.compact}"/>
                 </g:if>
                 <g:hiddenField name="formInput" value="true"/>
-                        <span class="prompt action" onclick="['${rkey}filter','${rkey}filterdispbtn'].each(Element.toggle);if(${isCompact}){$('${rkey}evtscontent').toggle();}">
-                            Filter
-                            <img src="${resource(dir:'images',file:'icon-tiny-disclosure-open.png')}" width="12px" height="12px"/>
-                        </span>
+                <g:hiddenField name="projFilter" value="${session.project}"/>
 
-                <g:render template="/common/queryFilterManager" model="${[rkey:rkey,filterName:filterName,filterset:filterset,update:rkey+'evtsForm',deleteActionSubmitRemote:[controller:'reports',action:'deleteFilter',params:[fragment:true]],storeActionSubmitRemote:[controller:'reports',action:'storeFilter',params:[fragment:true]]]}"/>
-                <div class="presentation filter">
-
+                <g:ifServletContextAttribute attribute="RSS_ENABLED" value="true">
+                    <a title="RSS 2.0" class="floatr"
+                       href="${createLink(controller: "feed", action: "index", params: paginateParams)}"
+                        style="margin: 0 10px;"
+                       id="rsslink"><img
+                            src="${resource(dir: 'images', file: 'feed.png')}" width="14px" height="14px"
+                            alt=""/> RSS</a>
+                </g:ifServletContextAttribute>
+                <g:render template="/common/queryFilterManager" model="${[rkey:rkey,filterName:filterName,filterset:filterset,update:rkey+'evtsForm',deleteActionSubmitRemote:[controller:'reports',action:'deleteFilter',params:[fragment:true]], storeActionSubmit:'storeFilter']}"/>
+                <div class="filter">
                     <g:hiddenField name="max" value="${max}"/>
-                    <g:hiddenField name="offset" value="${offset}"/>
-                    <table class="simpleForm">
-                        <g:render template="recentDateFilters" model="${[params:params,query:query]}"/>
-                        <g:render template="advDateFilters" model="${[params:params,query:query]}"/>
-                        <g:render template="baseFilters" model="${[params:params,query:query]}"/>
-                    </table>
+                        <g:render template="baseFiltersPlain" model="${[params: params, query: query]}"/>
+                        <g:render template="recentDateFiltersPlain" model="${[params:params,query:query]}"/>
+                        <g:render template="advDateFiltersPlain" model="${[params:params,query:query]}"/>
 
-                    <div style="text-align:right;">
-                        <g:submitToRemote  value="Clear" name="clearFilter" url="[controller:'reports',action:'clearFragment']" update="${rkey}evtsForm" />
-                        <g:submitToRemote  value="Filter Events" name="filterAll" url="[controller:'reports',action:'eventsFragment']" update="${rkey}evtsForm" />
-                    </div>
+                    <span style="text-align:right;">
+                        <g:submitButton value="Filter" name="filterAll"/>
+                    </span>
                 </div>
-                </g:form>
-        </td>
-            </g:if>
-            <td style="text-align:left;vertical-align:top;" id="${rkey}evtscontent">
+            </g:form>
+        </div>
+        </g:if>
+    </div>
+            <div id="${rkey}evtscontent">
                 <g:if test="${!params.nofilters}">
-                <div>
-                    <g:if test="${displayParams}">
-
-
+                <div class="queryresultsinfo">
                         <g:if test="${!params.compact}">
-                            <span class="prompt">${total} Events</span>
+                            <span class="prompt"><span class="_obs_histtotal">${total}</span> Results</span>
                             matching ${filterName?'filter':'your query'}
                         </g:if>
 
@@ -62,43 +58,39 @@
                             <span class="info note">or choose a saved filter:</span>
                         </g:if>
                         <g:render template="/common/selectFilter" model="[noSelection:'-Within 1 Day-',filterset:filterset,filterName:filterName,prefName:'events']"/>
+                        <g:if test="${includeBadge}">
 
-                        <div style="padding:5px 0;margin:5px 0;${!filtersOpen?'':'display:none;'} " id='${rkey}filterdispbtn' >
-                            <span title="Click to modify filter" class="info textbtn query action" onclick="['${rkey}filter','${rkey}filterdispbtn'].each(Element.toggle);if(${isCompact}){$('${rkey}evtscontent').toggle();}" >
-                                <g:render template="displayFilters" model="${[displayParams:displayParams]}"/>
-                                <img src="${resource(dir:'images',file:'icon-tiny-disclosure.png')}" width="12px" height="12px"/>
+                            <span class="badgeholder" id="eventsCountBadge" style="display:none">
+                                <g:link action="index"
+                                        title="click to load new events"
+                                        params="${filterName ? [filterName: filterName] : params}"><span
+                                        class="badge newcontent active" id="eventsCountContent"
+                                        title="click to load new events"></span>
+                                </g:link>
                             </span>
-
-                            <g:if test="${!filterName}">
-                                <span class="prompt action " onclick="['${rkey}filter','${rkey}filterdispbtn','${rkey}fsave','${rkey}fsavebtn'].each(Element.toggle);if(${isCompact}){$('${rkey}evtscontent').toggle();}" id="${rkey}fsavebtn" title="Click to save this filter with a name">
-                                    save this filter&hellip;
-                                </span>
-                            </g:if>
-
-
-
-                        </div>
-                    </g:if>
-                    <g:else>
-                        <span class="prompt">Events (${total})</span>
-                        <span class="prompt action" onclick="['${rkey}filter','${rkey}filterdispbtn'].each(Element.toggle);if(${isCompact}){$('${rkey}evtscontent').toggle();}" id="${rkey}filterdispbtn"  style="${!filtersOpen?'':'display:none;'}">
-                            Filter
-                            <img src="${resource(dir:'images',file:'icon-tiny-disclosure.png')}" width="12px" height="12px"/>
-                        </span>
-                        <g:if test="${filterset}">
-                            <span class="info note">Filter:</span>
-                            <g:render template="/common/selectFilter" model="[noSelection:'-Within 1 Day-',filterset:filterset,filterName:filterName,prefName:'events']"/>
                         </g:if>
-                    </g:else>
+                        <g:if test="${includeAutoRefresh}">
+                            <g:checkBox name="refresh" value="true" checked="${params.refresh=='true'}" class="autorefresh" id="autorefresh"/>
+                            <label for="autorefresh">
+                                Auto refresh
+                            </label>
+                        </g:if>
                 </div>
                 </g:if>
 
                 <div class="jobsReport clear">
                     <g:if test="${reports}">
-                        <g:render template="baseReport" model="['reports':reports,options:params.compact?[tags:false]:[:],hiliteSince:params.hiliteSince]"/>
+                        <table cellpadding="0" cellspacing="0" class="jobsList list history" style="width:100%">
+                        <g:if test="${includeNowRunning}">
+                            <tbody id="nowrunning"></tbody>
+                        </g:if>
+                        <tbody id="histcontent">
+                            <g:render template="baseReport" model="['reports':reports,options:params.compact?[tags:false, summary: false]:[summary:true],hiliteSince:params.hiliteSince]"/>
+                        </tbody>
+                        </table>
 
                             <g:if test="${total && max && total.toInteger() > max.toInteger()}">
-                                <span class="info note">Showing ${reports.size()} of ${total}</span>
+                                <span class="info note">Showing ${reports.size()} of <span class="_obs_histtotal">${total}</span></span>
                                 <g:if test="${params.compact}">
                                     <a href="${createLink(controller:'reports',action:params.moreLinkAction?params.moreLinkAction:'index',params:filterName?[filterName:filterName]:paginateParams?paginateParams:[:])}">More&hellip;</a>
                                 </g:if>
@@ -109,18 +101,8 @@
                     </g:if>
                 </div>
 
-                 </td>
+                 </div>
 
-                </tr>
-            </table>
-<g:javascript>
-
-$$('#${rkey}evtsForm input').each(function(elem){
-    if(elem.type=='text'){
-        elem.observe('keypress',noenter);
-    }
-});
-</g:javascript>
 <g:if test="${lastDate}">
 <g:set var="checkUpdatedParams" value="${[since:lastDate]}"/>
 %{
@@ -134,6 +116,6 @@ $$('#${rkey}evtsForm input').each(function(elem){
 </g:if>
 <g:set var="refreshUrl" value="${g.createLink(action:'eventsFragment',params:filterName?[filterName:filterName]:paginateParams)}"/>
 <g:set var="rssUrl" value="${g.createLink(controller:'feed',action:'index',params:filterName?[filterName:filterName]:paginateParams)}"/>
-<g:render template="/common/boxinfo" model="${[name:'events',model:[title:'History',total:total,url:refreshUrl,checkUpdatedUrl:checkUpdatedUrl,rssUrl:rssUrl,lastDate:lastDate]]}"/>
+<g:render template="/common/boxinfo" model="${[name:'events',model:[title:'History',total:total, max: max, offset: offset,url:refreshUrl,checkUpdatedUrl:checkUpdatedUrl,rssUrl:rssUrl,lastDate:lastDate]]}"/>
 
 </div>

@@ -1,7 +1,7 @@
-RDECK_HOME=/etc/rundeck
+RDECK_HOME=/var/lib/rundeck
 export RDECK_HOME
 
-RDECK_BASE=/etc/rundeck
+RDECK_BASE=/var/lib/rundeck
 export RDECK_BASE
 
 JAVA_CMD=java
@@ -24,17 +24,17 @@ export BOOTSTRAP_CP=$(find /var/lib/rundeck/bootstrap -name \*.jar -printf %p:)
 export RDECK_JVM="-Djava.security.auth.login.config=/etc/rundeck/jaas-loginmodule.conf \
 	-Dloginmodule.name=RDpropertyfilelogin \
 	-Drdeck.config=/etc/rundeck \
-	-Drdeck.base=/etc/rundeck \
+	-Drdeck.base=/var/lib/rundeck \
 	-Drundeck.server.configDir=/etc/rundeck \
 	-Dserver.datastore.path=/var/lib/rundeck/data \
 	-Drundeck.server.serverDir=/var/lib/rundeck \
 	-Drdeck.projects=/var/rundeck/projects \
 	-Drdeck.runlogs=/var/lib/rundeck/logs \
-	-Drundeck.config.name=/etc/rundeck/rundeck-config.properties"
+	-Drundeck.config.location=/etc/rundeck/rundeck-config.properties"
 #
 # Set min/max heap size
 #
-RDECK_JVM="$RDECK_JVM -Xmx1024m -Xms256m"
+RDECK_JVM="$RDECK_JVM -Xmx1024m -Xms256m -server"
 #
 # SSL Configuration - Uncomment the following to enable.  Check SSL.properties for details.
 # 

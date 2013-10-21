@@ -6,15 +6,15 @@
         <g:renderErrors bean="${scheduledExecution}" as="list"/>
     </div>
 </g:hasErrors>
+<g:render template="/common/messages"/>
 
 <g:set var="rkey" value="${g.rkey()}"/>
 
-<input type="hidden" name="id" value="${scheduledExecution?.id}"/>
+<input type="hidden" name="id" value="${scheduledExecution?.extid}"/>
 <div class="note error" style="display: none" id="editerror">
 
 </div>
 
-<g:if test="${!scheduledExecution.adhocExecution }">
 <span class="prompt">Job Options:</span>
 <div class="presentation">
     <g:hasErrors bean="${scheduledExecution}" field="argString">
@@ -27,40 +27,15 @@
                   model="[paramsPrefix:'extra.',selectedargstring:selectedargstring,selectedoptsmap:selectedoptsmap,notfound:commandnotfound,authorized:authorized,optionSelections:scheduledExecution?.options?scheduledExecution.options:null,scheduledExecutionId:scheduledExecution.id,jobexecOptionErrors:jobexecOptionErrors, optiondependencies: optiondependencies, dependentoptions: dependentoptions, optionordering: optionordering]"/>
     </div>
 </div>
-</g:if>
-<g:if test="${scheduledExecution.adhocExecution && (scheduledExecution.adhocFilepath||scheduledExecution.adhocLocalString)}">
-    <span class="prompt">Script Arguments:</span>
+
+
+<g:if test="${scheduledExecution.loglevel != 'DEBUG'}">
     <div class="presentation">
-        <g:hasErrors bean="${scheduledExecution}" field="argString">
-            <div class="fieldError">
-                <g:renderErrors bean="${scheduledExecution}" as="list" field="argString"/>
-            </div>
-        </g:hasErrors>
-
-        <span class="input">
-            <input type='text' name="extra.argString" value='${scheduledExecution?.argString?.encodeAsHTML()}' id="schedJobArgString" size="40"/>
-            <g:hasErrors bean="${scheduledExecution}" field="argString">
-                <img src="${resource( dir:'images',file:'icon-small-warn.png' )}" alt="Error"  width="16px" height="16px"/>
-            </g:hasErrors>
-        </span>
-        <span class="info note">
-            Enter arguments to the script.
-        </span>
+        <label><g:checkBox name="extra.debug" value="true" checked="false"/>
+            <g:message code="enable.verbose.logging" />
+        </label>
     </div>
 </g:if>
-
-<span class="prompt">Log level:</span>
-<div class="presentation">
-    <g:select name="extra.loglevel"
-              from="${['1. Debug','2. Verbose','3. Information','4. Warning','5. Error']}"
-              keys="${['DEBUG','VERBOSE','INFO','WARN','ERR']}"
-              value="${scheduledExecution.loglevel?scheduledExecution.loglevel:'WARN'}"
-        />
-
-    <div class="info note">
-        Higher numbers produce less output.
-    </div>
-</div>
 
 <g:if test="${failedNodes}">
     <g:hiddenField name="_replaceNodeFilters" value="true"/>

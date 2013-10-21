@@ -1,5 +1,9 @@
 package rundeck
 
+import com.dtolabs.rundeck.core.plugins.configuration.PropertyResolverFactory
+import org.codehaus.groovy.grails.commons.ConfigurationHolder
+
+import java.text.MessageFormat
 import java.text.SimpleDateFormat
 import rundeck.ScheduledExecution
 
@@ -7,7 +11,7 @@ class UtilityTagLib{
     def static  daysofweekkey = [Calendar.SUNDAY,Calendar.MONDAY,Calendar.TUESDAY,Calendar.WEDNESDAY,Calendar.THURSDAY,Calendar.FRIDAY,Calendar.SATURDAY];
     def public static daysofweekord = ScheduledExecution.daysofweeklist;
     def public static monthsofyearord = ScheduledExecution.monthsofyearlist;
-	static returnObjectForTags = ['rkey','w3cDateValue','sortGroupKeys']
+	static returnObjectForTags = ['rkey','w3cDateValue','sortGroupKeys','helpLinkUrl']
     def frameworkService
   
     private static Random rand=new java.util.Random()
@@ -605,5 +609,75 @@ class UtilityTagLib{
                 out<<attrs.value+' ('+attrs.unit+')'
             }
         }
+    }
+
+    def helpLinkUrl={attrs,body->
+        def path=''
+        def fragment=''
+        if(attrs.path){
+            path=attrs.path
+            if(!path.startsWith('/')){
+                path='/'+path
+            }
+            if(path.contains('#')){
+                def split=path.split('#',2)
+                path=split[0]
+                fragment='#'+split[1]
+            }
+        }
+        def helpBase='http://rundeck.org/' + grailsApplication.metadata['app.version']
+        def helpUrl
+        if(ConfigurationHolder.config.rundeck?.gui?.helpLink){
+            helpBase= ConfigurationHolder.config.rundeck?.gui?.helpLink
+            helpUrl=helpBase + path + fragment
+        }else{
+            def helpParams = [utm_source: 'rundeckapp', utm_medium: 'app', utm_campaign: 'helplink', utm_content: (controllerName + '/' + actionName)].collect { k, v -> k + '=' + v }.join('&')
+            helpUrl= helpBase + path + '?' + helpParams + fragment
+        }
+        helpUrl
+    }
+
+    def pluginPropertyProjectScopeKey={attrs,body->
+        out<< PropertyResolverFactory.projectPropertyPrefix(PropertyResolverFactory.pluginPropertyPrefix(attrs.service, attrs.provider)) + (attrs.property ?: '')
+    }
+    def pluginPropertyFrameworkScopeKey={attrs,body->
+        out << PropertyResolverFactory.frameworkPropertyPrefix(PropertyResolverFactory.pluginPropertyPrefix(attrs.service, attrs.provider))+(attrs.property?:'')
+    }
+
+    def markdown={ attrs, body ->
+        out<<body().toString().decodeMarkdown()
+    }
+
+    /**
+     * Outputs the attribute "user", or "you" if it matches the current user,optionally wrap in span with given class if it
+     * is "you", with attribute "youclass"
+     */
+    def username={attrs,body->
+        if(attrs.user==session.user){
+            if(attrs.youclass){
+                out<<"<span class='${attrs.youclass.encodeAsHTML()}'>"
+            }
+            out << "you"
+            if (attrs.youclass) {
+                out << "</span>"
+            }
+        }else{
+            out<<attrs.user
+        }
+    }
+
+    /**
+     * Render plural text for a count of items
+     * attributes: count,
+     */
+    def plural={attrs,body->
+        def singular=attrs.code?g.message(code:attrs.code):attrs.singular?:body()
+        def plural=attrs.code?g.message(code:(attrs.code+'.plural')):attrs.plural?:(singular+'s')
+        def count=null!=attrs.count?attrs.count:null!=attrs.for?attrs.for.size():0
+        def text= count == 1 ? singular.encodeAsHTML() : plural.encodeAsHTML()
+        def parts = [count,text]
+        def code=attrs.verb&&!attrs.textOnly?'plural.count.verb.format':attrs.verb?'plural.verb.format':!attrs.textOnly?'plural.count.format':'plural.format'
+        parts << (count == 1 ? g.message(code: attrs.verb, default: attrs.verb).encodeAsHTML() : g.message(code: attrs.verb + '.plural', default: attrs.verbPlural).encodeAsHTML())
+        out << (new MessageFormat(g.message(code: code, default: '{0} {1} {2}'))).format(parts as Object[], new StringBuffer(), null).toString()
     }
 }

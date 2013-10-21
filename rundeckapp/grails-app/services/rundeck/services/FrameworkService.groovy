@@ -1,29 +1,29 @@
 package rundeck.services
-
+import com.dtolabs.rundeck.core.Constants
+import com.dtolabs.rundeck.core.authentication.Group
+import com.dtolabs.rundeck.core.authentication.Username
+import com.dtolabs.rundeck.core.authorization.Attribute
+import com.dtolabs.rundeck.core.authorization.DenyAuthorization
+import com.dtolabs.rundeck.core.authorization.providers.EnvironmentalContext
+import com.dtolabs.rundeck.core.authorization.providers.SAREAuthorization
 import com.dtolabs.rundeck.core.common.*
-import com.dtolabs.rundeck.core.authorization.*
-import com.dtolabs.rundeck.core.utils.*
-
-import org.springframework.beans.BeansException
+import com.dtolabs.rundeck.core.execution.service.ExecutionServiceException
+import com.dtolabs.rundeck.core.execution.service.MissingProviderException
+import com.dtolabs.rundeck.core.plugins.configuration.PropertyResolverFactory
+import com.dtolabs.rundeck.core.plugins.configuration.Describable
+import com.dtolabs.rundeck.core.plugins.configuration.Description
+import com.dtolabs.rundeck.core.plugins.configuration.Property
+import com.dtolabs.rundeck.core.plugins.configuration.Validator
+import com.dtolabs.rundeck.core.utils.SingleUserAclsAuthorization
+import com.dtolabs.rundeck.core.utils.SingleUserAuthentication
+import com.dtolabs.rundeck.core.utils.UserSubjectAuthorization
 import org.springframework.context.ApplicationContext
 import org.springframework.context.ApplicationContextAware
-
-import com.dtolabs.rundeck.core.Constants
-import javax.security.auth.Subject
-import com.dtolabs.rundeck.core.authorization.providers.EnvironmentalContext
-import com.dtolabs.rundeck.core.authentication.Username
-import com.dtolabs.rundeck.core.authentication.Group
-import com.dtolabs.rundeck.core.authorization.providers.SAREAuthorization
-import rundeck.ScheduledExecution
 import rundeck.Execution
 import rundeck.PluginStep
-import com.dtolabs.rundeck.core.execution.service.ExecutionServiceException
-import com.dtolabs.rundeck.core.plugins.configuration.Describable
-import com.dtolabs.rundeck.core.plugins.configuration.Validator
-import com.dtolabs.rundeck.core.plugins.configuration.Property
-import com.dtolabs.rundeck.core.plugins.configuration.Description
-import com.dtolabs.rundeck.core.execution.service.MissingProviderException
+import rundeck.ScheduledExecution
 
+import javax.security.auth.Subject
 /**
  * Interfaces with the core Framework object
  */
@@ -35,16 +35,13 @@ class FrameworkService implements ApplicationContextAware {
     def File varDir
     String rundeckbase
     String depsdir
+    private String serverUUID
+    private boolean clusterModeEnabled
     SAREAuthorization aclpolicies
 
     def ApplicationContext applicationContext
     def ExecutionService executionService
     def projects
-
-    // implement ApplicationContextAware interface
-    def void setApplicationContext(ApplicationContext ac) throws BeansException {
-        applicationContext = ac;
-    }
 
     def getRundeckBase(){
         if (!initialized) {
@@ -56,6 +53,9 @@ class FrameworkService implements ApplicationContextAware {
 
     // Initailize the Framework
     def initialize() {
+        if(initialized){
+            return
+        }
         if (!applicationContext){
             throw new IllegalStateException("ApplicationContext instance not found!")
         }
@@ -74,7 +74,15 @@ class FrameworkService implements ApplicationContextAware {
 
         aclpolicies= new SAREAuthorization(new File(Constants.getFrameworkConfigDir(rundeckbase)))
 
-        initialized = true 
+        clusterModeEnabled = applicationContext.getServletContext().getAttribute("CLUSTER_MODE_ENABLED")=='true'
+        serverUUID = applicationContext.getServletContext().getAttribute("SERVER_UUID")
+        initialized = true
+    }
+    def isClusterModeEnabled(){
+        return clusterModeEnabled
+    }
+    def getServerUUID(){
+        return serverUUID
     }
    
     def getVarDir() {
@@ -86,11 +94,14 @@ class FrameworkService implements ApplicationContextAware {
      */
     def projects (Framework framework) {
         //authorize the list of projects
-        def projs = framework.getFrameworkProjectMgr().listFrameworkProjects()
-        def allowed=projs.findAll { FrameworkProject fp->
-            authorizeApplicationResource(framework,[type:'project',name:fp.getName()],'read')
+        def projMap=[:]
+        def resources=[] as Set
+        for (proj in framework.frameworkProjectMgr.listFrameworkProjects()) {
+            projMap[proj.name] = proj;
+            resources << [type: 'project', name: proj.name]
         }
-        return new ArrayList(allowed)
+        def authed = authorizeApplicationResourceSet(framework, resources, 'read')
+        return new ArrayList(authed.collect{projMap[it.name]})
     }
 
     def existsFrameworkProject(String project, Framework framework) {
@@ -101,6 +112,35 @@ class FrameworkService implements ApplicationContextAware {
         return framework.getFrameworkProjectMgr().getFrameworkProject(project)
     }
 
+    /**
+     * Get a property resolver for optional project level
+     * @param projectName
+     * @return
+     */
+    def getFrameworkPropertyResolver(String projectName=null, Map instanceConfiguration=null) {
+        final File rdbaseDir = new File(rundeckbase)
+        def fwk = Framework.createPropertyRetriever(rdbaseDir)
+        def projBaseDir = getFrameworkProjectsBasedir(rundeckbase)
+        return PropertyResolverFactory.createResolver(
+                instanceConfiguration?PropertyResolverFactory.instanceRetriever(instanceConfiguration):null,
+                null != projectName
+                ? Framework.createProjectPropertyRetriever(rdbaseDir, new File(projBaseDir), projectName)
+                : null,
+                fwk)
+    }
+    /**
+     * Return the property retriever for framework properties from the base dir.
+     * @return
+     */
+    def getFrameworkProperties(){
+        final File rdbaseDir = new File(rundeckbase)
+        return Framework.createPropertyRetriever(rdbaseDir)
+    }
+    static def getFrameworkProjectsBasedir(String rundeckbase){
+        def baseDir = new File(rundeckbase)
+        def fwk = Framework.createPropertyRetriever(baseDir)
+        return fwk.getProperty("framework.projects.dir") ?: Framework.getProjectsBaseDir(baseDir)
+    }
     /**
      * Filter nodes for a project given the node selector
      * @param framework
@@ -276,6 +316,21 @@ class FrameworkService implements ApplicationContextAware {
             Collections.singleton(new Attribute(URI.create(EnvironmentalContext.URI_BASE + "application"), 'rundeck')))
         return decision.authorized
     }
+    /**
+     * return all authorized resources for the action evaluated in the application context
+     * @param framework
+     * @param resources requested resources to authorize
+     * @param action
+     * @return set of authorized resources
+     */
+    def Set authorizeApplicationResourceSet(Framework framework, Set<Map> resources, String action) {
+        def decisions = framework.getAuthorizationMgr().evaluate(
+                resources,
+                framework.getAuthenticationMgr().subject,
+                [action] as Set,
+                Collections.singleton(new Attribute(URI.create(EnvironmentalContext.URI_BASE + "application"), 'rundeck')))
+        return decisions.findAll {it.authorized}.collect {it.resource}
+    }
 
     /**
      * return true if all of the actions are authorized for the resource in the application context
@@ -331,7 +386,7 @@ class FrameworkService implements ApplicationContextAware {
 
     def getFrameworkNodeName() {
         def rdbase= getRundeckBase()
-        def Framework fw = Framework.getInstance(rdbase)
+        def Framework fw = Framework.getInstance(rdbase, getFrameworkProjectsBasedir(rdbase))
         fw.setAuthorizationMgr(new DenyAuthorization(fw, new File(Constants.getFrameworkConfigDir(rdbase))))
         return fw.getFrameworkNodeName()
     }
@@ -356,7 +411,8 @@ class FrameworkService implements ApplicationContextAware {
         return getFrameworkForUserAndRoles(user, rolelist, getRundeckBase())
     }
     public static Framework getFrameworkForUserAndRoles(String user, List rolelist, String rundeckbase){
-        def Framework fw = Framework.getInstance(rundeckbase)
+        String projectsBase = getFrameworkProjectsBasedir(rundeckbase)
+        def Framework fw = Framework.getInstance(rundeckbase, projectsBase)
         if(null!=user && null != rolelist){
             //create fake subject
             Subject subject = new Subject()
@@ -375,7 +431,8 @@ class FrameworkService implements ApplicationContextAware {
         return fw
     }
     public static Framework getFrameworkForUserAndSubject(String user, Subject subject, String rundeckbase){
-        def Framework fw = Framework.getInstance(rundeckbase)
+        String projectsBase = getFrameworkProjectsBasedir(rundeckbase)
+        def Framework fw = Framework.getInstance(rundeckbase, projectsBase)
         if(null!=user && null!=subject){
             def authen = new SingleUserAuthentication(user,subject)
             def author = new UserSubjectAuthorization(fw,new File(Constants.getFrameworkConfigDir(rundeckbase)), user, subject)
@@ -390,9 +447,9 @@ class FrameworkService implements ApplicationContextAware {
 
     /**
      * Create a map of option name to value given an input argline.
-     * Supports the form "-option value", and boolean "-option", which is given
-     * the value of "true".  Other options are ignored. if a double-dash
-     * is seen it is not interpreted, and --option is parsed as option name "-option".
+     * Supports the form "-option value".  Tokens not in that form are ignored. The string
+     * can have quoted values, using single or double quotes, and allows double/single to be
+     * embedded. To embed single/single or double/double, the quotes should be repeated.
      */
     def Map<String,String> parseOptsFromString(String argstring){
         if(!argstring){
@@ -401,25 +458,25 @@ class FrameworkService implements ApplicationContextAware {
         def String[] tokens=com.dtolabs.rundeck.core.utils.OptsUtil.burst(argstring)
         return parseOptsFromArray(tokens)
     }
+    /**
+     * Parse an array of tokens in the form ['-optionname','value',...], ignoring
+     * incorrectly sequenced values and options.
+     * @param tokens
+     * @return
+     */
     def Map<String,String> parseOptsFromArray(String[] tokens){
         def Map<String,String> optsmap = new HashMap<String,String>()
         def String key=null
         for(int i=0;i<tokens.length;i++){
-            if(tokens[i].startsWith("-") && tokens[i].length()>1){
-                if(key){
-                    //previous key was boolean flag, set to true
-                    optsmap[key]="true"
-                    key=null
-                }
+            if (key) {
+                optsmap[key] = tokens[i]
+                key = null
+            }else if (tokens[i].startsWith("-") && tokens[i].length()>1){
                 key=tokens[i].substring(1)
-            }else if(key){
-                optsmap[key]=tokens[i]
-                key=null
             }
         }
         if(key){
-            optsmap[key]="true"
-            key=null
+            //ignore
         }
         return optsmap
     }

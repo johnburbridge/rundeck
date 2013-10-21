@@ -8,7 +8,6 @@
 
 description = 'The master-build project for Rundeck';
 
-apply plugin: 'groovy';
 apply plugin: 'eclipse';
 apply plugin: 'idea'
 
@@ -18,7 +17,6 @@ eclipse.project.name = 'rundeck'
  * Defaults for all projects
  */
 subprojects {
-
     // set the eclipse project naming convention to rundeck:<path>:<projectName>
     // so it matches the logical hierarchy more closely
     apply plugin: 'eclipse'
@@ -29,9 +27,21 @@ subprojects {
     ext.environment = project.hasProperty('environment') ? environment : 'development';
     
     // Unless we're doing a release build, append -SNAPSHOT to the end of the
-    // artifacts. Otherwise use the currentVersion as defined in gradle.properties
-    version = project.hasProperty('environment') && environment == 'release' ? 
-        currentVersion : currentVersion + '-SNAPSHOT';
+    // artifacts. Otherwise use the currentVersion as defined in gradle.properties and
+    // the releaseTag if it is not 'GA'
+    def vtag = environment != 'release' ? '-SNAPSHOT' : (project.hasProperty('releaseTag') && releaseTag!='GA' ? '-'+releaseTag : '')  
+    version = currentVersion + vtag
+
+    ext.isReleaseBuild = false
+    ext.isSnapshotBuild = false
+    ext.isDevBuild = false
+    if(project.hasProperty('environment') && project.environment == 'release'){
+        ext.isReleaseBuild=true
+    }else if(project.hasProperty("snapshot")){
+        ext.isSnapshotBuild=true
+    }else{
+        ext.isDevBuild=true
+    }
 }
 
 task wrapper(type: Wrapper) {

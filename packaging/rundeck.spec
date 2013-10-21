@@ -58,9 +58,6 @@ fi
 %dir /var/lib/rundeck/var
 %dir /var/lib/rundeck/var/tmp
 
-# Docs
-%doc /usr/share/man
-
 # The Rundeck WebApp.  The Exploded War Goes Here.
 %dir /var/lib/rundeck/exp
 /var/lib/rundeck/exp/webapp
@@ -68,11 +65,14 @@ fi
 # Server Bootstrap
 %dir /var/lib/rundeck/bootstrap
 /var/lib/rundeck/bootstrap/jetty-6.1.21.jar
-/var/lib/rundeck/bootstrap/jetty-naming-6.1.21.jar
 /var/lib/rundeck/bootstrap/jetty-plus-6.1.21.jar
 /var/lib/rundeck/bootstrap/jetty-util-6.1.21.jar
+/var/lib/rundeck/bootstrap/log4j-1.2.16.jar
+/var/lib/rundeck/bootstrap/jna-3.2.2.jar
+/var/lib/rundeck/bootstrap/libpam4j-1.5.jar
 /var/lib/rundeck/bootstrap/rundeck-jetty-server-%{_vname}.jar
 /var/lib/rundeck/bootstrap/servlet-api-2.5-20081211.jar
+/var/lib/rundeck/bootstrap/not-yet-commons-ssl-0.3.11.jar
 
 # CLI Lib Support
 %dir /var/lib/rundeck/cli
@@ -85,14 +85,17 @@ fi
 /var/lib/rundeck/cli/commons-collections-3.2.1.jar
 /var/lib/rundeck/cli/commons-httpclient-3.0.1.jar
 /var/lib/rundeck/cli/commons-lang-2.4.jar
-/var/lib/rundeck/cli/commons-logging-1.1.jar
+/var/lib/rundeck/cli/commons-logging-1.1.1.jar
 /var/lib/rundeck/cli/dom4j-1.6.1.jar
+/var/lib/rundeck/cli/icu4j-2.6.1.jar
 /var/lib/rundeck/cli/jaxen-1.1.jar
-/var/lib/rundeck/cli/jsch-0.1.45.jar
+/var/lib/rundeck/cli/jdom-1.0.jar
+/var/lib/rundeck/cli/jsch-0.1.50.jar
 /var/lib/rundeck/cli/log4j-1.2.16.jar
 /var/lib/rundeck/cli/rundeck-core-%{_vname}.jar
-/var/lib/rundeck/cli/xercesImpl-2.6.0.jar
 /var/lib/rundeck/cli/snakeyaml-1.9.jar
+/var/lib/rundeck/cli/xercesImpl-2.6.2.jar
+/var/lib/rundeck/cli/xom-1.0.jar
 
 # CLI Tools
 %attr(755, root, root) /usr/bin/run

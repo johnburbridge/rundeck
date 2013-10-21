@@ -1,7 +1,7 @@
 package rundeck
-
-import org.codehaus.groovy.grails.commons.ConfigurationHolder
 import com.dtolabs.rundeck.app.support.BaseNodeFilters
+import com.dtolabs.rundeck.util.XmlParserUtil
+
 /**
 * Execution
 */
@@ -46,12 +46,14 @@ class Execution extends ExecutionContext {
         nodeThreadcount(nullable:true)
         nodeRankOrderAscending(nullable: true)
         nodeRankAttribute(nullable: true)
-        adhocExecution(nullable:true)
-        adhocRemoteString(nullable:true, blank:true)
-        adhocLocalString(nullable:true, blank:true)
-        adhocFilepath(nullable:true, blank:true)
         failedNodeList(nullable:true, blank:true)
         abortedby(nullable:true, blank:true)
+        serverNodeUUID(size:36..36, blank: true, nullable: true, validator: { val, obj ->
+            if (null == val) return true;
+            try { return null!= UUID.fromString(val) } catch (IllegalArgumentException e) {
+                return false
+            }
+        })
     }
 
     static mapping = {
@@ -62,7 +64,21 @@ class Execution extends ExecutionContext {
 
         failedNodeList type: 'text'
         outputfilepath type: 'text'
-        nodeIncludeName type: 'text'
+        nodeInclude(type: 'text')
+        nodeExclude(type: 'text')
+        nodeIncludeName(type: 'text')
+        nodeExcludeName(type: 'text')
+        nodeIncludeTags(type: 'text')
+        nodeExcludeTags(type: 'text')
+        nodeIncludeOsName(type: 'text')
+        nodeExcludeOsName(type: 'text')
+        nodeIncludeOsFamily(type: 'text')
+        nodeExcludeOsFamily(type: 'text')
+        nodeIncludeOsArch(type: 'text')
+        nodeExcludeOsArch(type: 'text')
+        nodeIncludeOsVersion(type: 'text')
+        nodeExcludeOsVersion(type: 'text')
+
     }
 
 
@@ -116,7 +132,7 @@ class Execution extends ExecutionContext {
         map.doNodedispatch= this.doNodedispatch
         if(doNodedispatch){
             def yfilters = ["": "hostname"]
-            map.nodefilters = [dispatch: [threadcount: nodeThreadcount, keepgoing: nodeKeepgoing, excludePrecedence: nodeExcludePrecedence]]
+            map.nodefilters = [dispatch: [threadcount: nodeThreadcount?:1, keepgoing: nodeKeepgoing, excludePrecedence: nodeExcludePrecedence]]
             if (nodeRankAttribute) {
                 map.nodefilters.dispatch.rankAttribute = nodeRankAttribute
             }
@@ -152,22 +168,22 @@ class Execution extends ExecutionContext {
         exec.outputfilepath = data.outputfilepath
         exec.failedNodeList = data.failedNodeList
         exec.abortedby = data.abortedby
-        exec.cancelled = data.cancelled
+        exec.cancelled = XmlParserUtil.stringToBool(data.cancelled,false)
         exec.argString = data.argString
         exec.loglevel = data.loglevel
         exec.doNodedispatch = data.doNodedispatch
         if (data.nodefilters) {
-            exec.nodeThreadcount = data.nodefilters.dispatch.threadcount
-            if (data.nodefilters.dispatch.containsKey('keepgoing')) {
-                exec.nodeKeepgoing = data.nodefilters.dispatch.keepgoing
+            exec.nodeThreadcount = XmlParserUtil.stringToInt(data.nodefilters.dispatch?.threadcount,1)
+            if (data.nodefilters.dispatch?.containsKey('keepgoing')) {
+                exec.nodeKeepgoing = XmlParserUtil.stringToBool(data.nodefilters.dispatch.keepgoing, false)
             }
-            if (data.nodefilters.dispatch.containsKey('excludePrecedence')) {
-                exec.nodeExcludePrecedence = data.nodefilters.dispatch.excludePrecedence
+            if (data.nodefilters.dispatch?.containsKey('excludePrecedence')) {
+                exec.nodeExcludePrecedence = XmlParserUtil.stringToBool(data.nodefilters.dispatch.excludePrecedence, true)
             }
-            if (data.nodefilters.dispatch.containsKey('rankAttribute')) {
+            if (data.nodefilters.dispatch?.containsKey('rankAttribute')) {
                 exec.nodeRankAttribute = data.nodefilters.dispatch.rankAttribute
             }
-            if (data.nodefilters.dispatch.containsKey('rankOrder')) {
+            if (data.nodefilters.dispatch?.containsKey('rankOrder')) {
                 exec.nodeRankOrderAscending = data.nodefilters.dispatch.rankOrder == 'ascending'
             }
             if (data.nodefilters.include) {

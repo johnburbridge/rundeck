@@ -46,7 +46,7 @@ Each Job definition requires these values:
 
 `project`
 
-:    the Project name
+:    the Project name (optional)
 
 `loglevel`
 
@@ -56,7 +56,7 @@ Each Job definition requires these values:
     * `VERBOSE`
     * `INFO`
     * `WARN`
-    * `ERR`
+    * `ERROR`
 
 [`sequence`](#sequence)
 
@@ -66,7 +66,6 @@ A minimal job definition example:
 
     name: job name
     description: ''
-    project: project1
     loglevel: INFO
     sequence: 
       - exec: a command
@@ -243,6 +242,36 @@ Example:
     - scripturl: http://example.com/path/to/script
       args: arguments to script
 
+### Script Interpreter
+
+For `script`, `scriptfile` and `scripturl`, you can optionally declare an "interpreter" string to use to execute the script, and whether the arguments are quoted or not.
+
+`scriptInterpreter`
+
+:     Optional string to declare an interpreter line for the script.  The script and args will be passed to this command, rather than executed directly.
+
+Example:
+
+     - script: |-
+        #!/bin/bash
+
+        echo this is a script
+        echo this is option value: @option.test@
+      args: arguments passed to the script
+      scriptInterpreter: interpreter -flag
+
+This script will then be executed as:
+
+    interpreter -flag script.sh arguments ...
+
+`interpreterArgsQuoted`
+
+:     Optional boolean, indicating whether the script and arguments should be quoted when passed to the interpreter.
+
+If `interpreterArgsQuoted` is `true`, then the script will then be executed as:
+
+    interpreter -flag 'script.sh arguments ...'
+
 ### Job Reference Entry
 
 This [Command](#command) executes another Rundeck Job.
@@ -263,12 +292,21 @@ This [Command](#command) executes another Rundeck Job.
 
     :    Arguments to pass to the job when executed
 
+    `nodeStep`
+
+    :    Execute as a Node Step (optional). `true/false`.
+
 Example:
 
     - jobref:
         group: test
         name: simple job test
         args: args for the job
+
+
+If `nodeStep` is set to "true", then the Job Reference step will operate as a *Node Step* instead of the
+default.  As a *Node Step* it will execute once for each matched node in the containing Job workflow, and
+can use node attribute variable expansion in the arguments to the job reference.
 
 ### Plugin Step Entry
 
@@ -350,6 +388,12 @@ Optional map entries are:
 `secure`
 
 :   "true/false" - whether the option is a secure input option. Not compatible with "multivalued"
+
+`sortIndex`
+
+:   *integer* - A number indicating the order this option should appear in the GUI.  If specified this
+    option will be arranged in order with other options with a `sortIndex` value. Any options without
+    a value will be arranged in alphabetical order below the other options.
 
 Example:
 
@@ -521,9 +565,10 @@ Example:
 
 ### Notification
 
-Defines result notification for the job.  You can include one or both of `onsuccess` or `onfailure` notifications. Each type of notification can include a list of email addresses and/or a list of URLs to use as a webhook.
+Defines a notification for the job.  You can include any of `onsuccess`, `onfailure` or `onstart` notifications. Each type of notification can define any of the built in notifications, or define plugin notifications.
 
-`onsuccess`/`onfailure`
+
+`onsuccess`/`onfailure`/`onstart`
 
 :    A Map containing either or both of:
 
@@ -535,6 +580,10 @@ Defines result notification for the job.  You can include one or both of `onsucc
     
     :    A comma-separated list of URLs to use as webhooks
 
+    [`plugin`](#plugin)
+
+    :    Defines a plugin notification.
+
 Example:
 
     notification:
@@ -542,8 +591,33 @@ Example:
         recipients: tom@example.com,shirley@example.com
       onsuccess:
         urls: 'http://server/callback?id=${execution.id}&status=${execution.status}&trigger=${notification.trigger}'
+        plugin:
+          type: myplugin
+          configuration:
+            somekey: somevalue
+      onstart:
+        -  plugin:
+            type: myplugin
+            configuration:
+              somekey: somevalue
+        -  plugin:
+            type: otherplugin
+            configuration:
+              a: b
 
 * For more information about the Webhook mechanism used, see the chapter [Integration - Webhooks](manual/jobs.html#webhooks).
+
+#### plugin
+
+Defines a plugin notification section, can contain a single Map, or a Sequence of Maps.  Each such map must have these contents:
+
+`type`
+
+:    The type identifier of the plugin
+
+`configuration`
+
+:    A Map containing any custom configuration key/values for the plugin.
 
 # SEE ALSO
 
