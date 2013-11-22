@@ -5,6 +5,7 @@ import com.dtolabs.rundeck.core.logging.LogLevel
 import com.dtolabs.rundeck.core.logging.LogUtil
 import com.dtolabs.rundeck.core.utils.Utility
 
+import java.text.DateFormat
 import java.text.SimpleDateFormat
 
 /**
@@ -19,11 +20,16 @@ class RundeckLogFormat implements OutputLogFormat, LineLogFormat {
     public static final String FILE_START = DELIM + FORMAT_MIME + DELIM
     public static final String FILE_END = DELIM + "END" + DELIM
     static final char BACKSLASH = '\\' as char
-    SimpleDateFormat w3cDateFormat
+    private static final ThreadLocal<DateFormat> w3cDateFormat = new ThreadLocal<DateFormat>() {
+        protected DateFormat initialValue() {
+            SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+            fmt.setTimeZone(TimeZone.getTimeZone("GMT"));
+            return fmt;
+        }
+    };
 
     public RundeckLogFormat() {
-        w3cDateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
-        w3cDateFormat.setTimeZone(TimeZone.getTimeZone("GMT"));
+
     }
 
     public String getHead() {
@@ -55,7 +61,7 @@ class RundeckLogFormat implements OutputLogFormat, LineLogFormat {
      */
     @Override
     String outputEvent(LogEvent entry) {
-        def String date = w3cDateFormat.format(entry.datetime)
+        def String date = w3cDateFormat.get().format(entry.datetime)
         String dMesg = entry.message ?: '';
         while (dMesg.endsWith('\r')) {
             dMesg = dMesg.substring(0, dMesg.length() - 1)
@@ -75,6 +81,9 @@ class RundeckLogFormat implements OutputLogFormat, LineLogFormat {
             def sort = metadata.keySet().sort()
             for (int i = 0; i < sort.size(); i++) {
                 def key = sort[i]
+                if(null==metadata[key]){
+                    continue
+                }
                 if (i > 0) {
                     sb.append('|')
                 }
@@ -96,7 +105,7 @@ class RundeckLogFormat implements OutputLogFormat, LineLogFormat {
     }
 
     static String backslashEscape(String dMesg, String chars) {
-        dMesg.replaceAll('([\\\\' + chars + '])', '\\\\$1')
+        dMesg ? dMesg.replaceAll('([\\\\' + chars + '])', '\\\\$1') : ''
     }
 
     static class RDFormatItem implements LineLogFormat.FormatItem {
@@ -152,7 +161,7 @@ class RundeckLogFormat implements OutputLogFormat, LineLogFormat {
             if (arr.length != 4) {
                 return RDFormatItem.error("Expected 4 sections: " + arr.length)
             }
-            Date time = w3cDateFormat.parse(arr[0])
+            Date time = w3cDateFormat.get().parse(arr[0])
             String eventType = arr[1] ?: LogUtil.EVENT_TYPE_LOG
             LogLevel level = LogLevel.valueOf(arr[2])
             def rest = arr[3]
